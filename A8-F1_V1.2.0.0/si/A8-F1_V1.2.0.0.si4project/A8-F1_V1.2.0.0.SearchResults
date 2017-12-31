@@ -1,0 +1,17 @@
+---- timer_taskRegister Matches (10 in 3 files) ----
+security_delaySendAlarm in security.c (G:\work\code\A8-F1_V1.2.0.0\security) : //	alarm_ringdown_TimerId  =  timer_taskRegister(ALAEM_DELAY_TIME,40*1000,3,security_triggerAlarmTinkle
+security_delaySendAlarm in security.c (G:\work\code\A8-F1_V1.2.0.0\security) : 	//alarm_sendMsg_TimerId = timer_taskRegister(ALAEM_DELAY_TIME,0,1,security_sendMsgToManager
+security_triggerAlarmTinkle in security.c (G:\work\code\A8-F1_V1.2.0.0\security) : 		alarm_state_TimerId = timer_taskRegister(39*1000,0,1,security_setAlarmState
+talkCommandInit in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 	timer_taskRegister(getLocalSequence()%20*1000,10*1000,-1,
+notAckcmdParseAndHandle in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 				//	timer_taskRegister(1000,0,1,delaysendAckBusy
+setTalkState in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 			//pack->timerId = timer_taskRegister(60*1000,0,1,pack->timeoutCallBackFunc,c);
+setTalkState in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 			//pack->timerId = timer_taskRegister(60*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
+setTalkState in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 			//pack->timerId = timer_taskRegister(120*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
+setTalkState in talkCommandTranslate.c (G:\work\code\A8-F1_V1.2.0.0\talkCommandTranslate) : 			//pack->timerId = timer_taskRegister(60*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
+timerTaskManage.c (G:\work\code\A8-F1_V1.2.0.0\common) line 21 : timer_t ** timer_taskRegister(unsigned int startTime,unsigned int loopTime,int loopCount,pThreadFunc callbackFunc,void *arg,int dataLen)
+---- timer_taskRegister Search Errors Encountered (4) ----
+The following 4 files could not be processed:
+G:\work\code\A8-F1_V1.2.0.0\common\bufferManage.h : File could not be opened.
+G:\work\code\A8-F1_V1.2.0.0\common\CallbackJavaMethod.h : File could not be opened.
+G:\work\code\A8-F1_V1.2.0.0\common\debugLog.h : File could not be opened.
+G:\work\code\A8-F1_V1.2.0.0\common\Utils_old.h : File could not be opened.
