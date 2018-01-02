@@ -8,7 +8,6 @@
 *.ko
 *.obj
 *.elf
-*output
 
 
 # Linker output

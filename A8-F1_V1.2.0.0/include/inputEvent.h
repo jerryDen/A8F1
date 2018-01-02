@@ -15,11 +15,11 @@ typedef enum E_KEY_STATE{
 #define OPEN_LOCK       2
 
 
-#define MQ_ALARM        KEY_E 
-#define HW_ALARM		KEY_A
-#define YW_ALARM        KEY_D
-#define JJ_ALARM        KEY_B 
-#define MC_ALARM        KEY_C
+#define MQ_ALARM        KEY_A   //煤气
+#define HW_ALARM		KEY_D   //红外
+#define YW_ALARM        KEY_B   //烟雾 
+#define JJ_ALARM        KEY_C   //紧急  
+#define MC_ALARM        KEY_E   //门磁
 
 
 #define KEY_STATE_UP     0

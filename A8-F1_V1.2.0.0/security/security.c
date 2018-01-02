@@ -8,7 +8,7 @@
 
 
 
-#define ALARM_INTERVAL_TIME 180   //安防触发间隔时间
+#define ALARM_INTERVAL_TIME 180  //安防触发间隔时间
 
 
 typedef enum E_SECURITY_MODE{
@@ -194,10 +194,11 @@ fail0:
 
 static void security_sendMsgToManager(void *arg)
 {
+	LOGD("发送报警");
 	if(arg == NULL)
 		return;
 	int type = *((int *)arg);
-	LOGD("发送报警");
+	
 	sendAlarmToManager(type);
 }
 static void security_setAlarmState(void *arg)

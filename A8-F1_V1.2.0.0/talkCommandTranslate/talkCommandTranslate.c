@@ -2,10 +2,12 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <fcntl.h> 
+
 #include "roomNetConfig.h"
 #include "Utils.h"
 #include "commStructDefine.h"
-#include "queueHandle.h"
 #include <sys/epoll.h>
 #include "commonHead.h"
 #include "talkCommandTranslate.h"
@@ -18,6 +20,7 @@
 #include "security.h"
 #include "netUdpServer.h"
 #include "threadManage.h"
+#include "bufferManage.h"
 typedef struct  StateMachinePack{
 	T_eTALK_STATUS	tackState;
 	T_Room destRoom; 
@@ -47,7 +50,9 @@ T_NetInterface  localNetInfo;
 
 pThreadOps sendUdpDataThread;
 
-pQueueHandlePack udpDataSendQueueHead;
+pBufferOps   udpSendBuf;
+
+
 
 
 pTimerOps delaySendBusyTimerId;
@@ -158,8 +163,8 @@ int talkCommandInit(T_Room room)
 	ackWakeCmdPack = waitAckPackInit(3000);
 	stateMachinePack = stateMachineInit();
 	
-	udpDataSendQueueHead = queueHandleInit(sizeof(S_NetDataPackage));
-	
+	udpSendBuf = createBufferServer(256);
+	CHECK_RET(udpSendBuf == NULL, "createBufferServer", goto fail0);
 	
 	sendUdpDataThread = pthread_register(udpSendThread,NULL,0,NULL);
 
@@ -280,7 +285,7 @@ int talkTranslateCmdToDestWaitAck(pUdpOps sendServer,T_Room destRoom , unsigned 
 		
 		dataPack.remoteInfo.sin_port = COMM_UNI_PORT;//
 		dataPack.sendServer = sendServer;
-		ret = pushDataToQueueHandle(udpDataSendQueueHead,&dataPack,1);
+		ret = udpSendBuf->push(udpSendBuf,&dataPack,sizeof(dataPack));
 		CHECK_RET(ret<0, "fail to pushDataToQueueHandle", goto fail0);
 		return 0;
 	}else{
@@ -424,7 +429,10 @@ void talkCommandExit(void)
 	destroyUdpServer(&udpSingleServer);
 	destroyUdpServer(&udpMulticastServer);
 	destroyUdpServer(&udpBoardServer);
-	queueHandleExit(&udpDataSendQueueHead);
+
+	
+	destroyBufferServer(&udpSendBuf);
+	
 	pthread_destroy(&sendUdpDataThread);	
 	destroyTimerTaskServer(&delaySendBusyTimerId);
 	destroyTimerTaskServer(&sendHeartbeatTimerId);
@@ -713,6 +721,7 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 			setTalkState(stateMachinePack,TALK_FREE);
 			break;
 		case    OTHER_DEV_PROC:
+			LOGD("OTHER_DEV_PROC");
 			break;
 		case 	READ_BLOCK_ROOM:
 			break;
@@ -1153,6 +1162,7 @@ static void * udpSendThread(void *arg)
 	S_NetDataPackage  sendPack;
 	int timeout;
 	unsigned sendCmd;
+	int waitRet;
 	T_Room destRoom;
 	T_eTALK_STATUS temp_state = 0;
 	int pullret = 0;
@@ -1160,50 +1170,55 @@ static void * udpSendThread(void *arg)
 	while(sendUdpDataThread->check(sendUdpDataThread ) == Thread_Run)
 	{
 		bzero(&sendPack,sizeof(S_NetDataPackage));
-		pullret = pullDataFromQueueHandle(udpDataSendQueueHead,&sendPack,sizeof(S_NetDataPackage));
-		if(0 == pullret)
-		{
+		waitRet = udpSendBuf->wait(udpSendBuf); //等待数据
+		if( TRI_DATA == waitRet ){
 			
-			timeout = 0;
-			sendCmd = ((pT_Comm_Head)(sendPack.dataBody.buf))->cmd;
-			destRoom = ((pT_Comm_Head)(sendPack.dataBody.buf))->destAddr;
-			
-sendAgain:
-			if(( temp_state = cmdToTalkState(sendCmd) ) >0 )
+			pullret = udpSendBuf->pull(udpSendBuf,&sendPack,sizeof(S_NetDataPackage)); //提取数据
+			if(sizeof(S_NetDataPackage) == pullret)
 			{
-				setTalkState(stateMachinePack,temp_state);
-			}
-			SendUpdServer = (pUdpOps)sendPack.sendServer;
-			//getUtilsOps()->printData(sendPack.dataBody.buf,sendPack.dataBody.len);
-			SendUpdServer->write(SendUpdServer,sendPack.dataBody.buf,
-			sendPack.dataBody.len,sendPack.remoteInfo.sin_addr.s_addr,
-			sendPack.remoteInfo.sin_port);
+				udpSendBuf->deleteLeft(udpSendBuf,pullret); //删除数据
+				timeout = 0;
+				sendCmd = ((pT_Comm_Head)(sendPack.dataBody.buf))->cmd;
+				destRoom = ((pT_Comm_Head)(sendPack.dataBody.buf))->destAddr;
+				
+	sendAgain:
+				if(( temp_state = cmdToTalkState(sendCmd) ) >0 )
+				{
+					LOGD("send data to remote!");
+					setTalkState(stateMachinePack,temp_state);
+				}
+				SendUpdServer = (pUdpOps)sendPack.sendServer;
+				//getUtilsOps()->printData(sendPack.dataBody.buf,sendPack.dataBody.len);
+				SendUpdServer->write(SendUpdServer,sendPack.dataBody.buf,
+				sendPack.dataBody.len,sendPack.remoteInfo.sin_addr.s_addr,
+				sendPack.remoteInfo.sin_port);
 
-			
-			if(waitRemoteAck(ackWakeCmdPack,(sendCmd)) == -1 ){
 				
-				if(timeout ++ < 1)
-					goto sendAgain;
-				else
-					switch(sendCmd)
-					{
-						case HEARTBEAT:
-						case WARN_CMD:
-							upCmdtoUiFunction(destRoom,UI_NETWORK_NOT_ONLINE,NULL,0);
-							break;
-						default:
-							setTalkState(stateMachinePack,TALK_FREE);
-							upCmdtoUiFunction(destRoom,UI_PEER_OFF_LINE,NULL,0);
-							break;
-					}
+				if(waitRemoteAck(ackWakeCmdPack,(sendCmd)) == -1 ){
 					
+					if(timeout ++ < 1)
+						goto sendAgain;
+					else
+						switch(sendCmd)
+						{
+							case HEARTBEAT:
+							case WARN_CMD:
+								upCmdtoUiFunction(destRoom,UI_NETWORK_NOT_ONLINE,NULL,0);
+								break;
+							default:
+								setTalkState(stateMachinePack,TALK_FREE);
+								upCmdtoUiFunction(destRoom,UI_PEER_OFF_LINE,NULL,0);
+								break;
+						}
+						
+						
+					//上报异常消息到UI
 					
-				//上报异常消息到UI
-				
+				}
+				//发送成功		
 			}
-			//发送成功		
 		}
-		else if(IS_EXIT == pullret )
+		else if(waitRet == TRI_EXIT)
 		{
 			goto exit0;
 		}
@@ -1386,18 +1401,31 @@ static int waitRemoteAck(pAckWakePack waitPack,char cmd)
 		return -1;
 
 	struct epoll_event eventItem;
+	int pollResult ;
 	char buf[16];
     ssize_t nRead;
-	
-	int pollResult = epoll_wait(waitPack->readPipeEpollFd, &eventItem, 1, waitPack->timeOut);//
-	
-    do {
-        nRead = read(waitPack->mWakeReadPipeFd, buf, sizeof(buf));
-    } while (nRead == sizeof(buf));
-	if(buf[0] == cmd  )
-		return  0;
-	else
+againWait:
+	pollResult = epoll_wait(waitPack->readPipeEpollFd, &eventItem, 1, waitPack->timeOut);//
+	if( pollResult == 0)
+	{
+		LOGD("epoll_wait timeout!");
 		return -1;
+	}else if( pollResult >0 ){ 
+	    do {
+	        nRead = read(waitPack->mWakeReadPipeFd, buf, sizeof(buf));
+	    } while (nRead == sizeof(buf));
+
+		
+		if(buf[nRead-1] == cmd  )
+			return  0;
+		else
+			goto againWait;
+	}else{
+		LOGD(" fail to epoll_wait");
+		return -1;
+
+	}
+
 }
 static void  waitAckPackDestroy(pAckWakePack * ackWakePack)
 {
@@ -1414,6 +1442,7 @@ static void  waitAckPackDestroy(pAckWakePack * ackWakePack)
 static int  wakeAckWait(pAckWakePack waitPack,char cmd)
 {
 	ssize_t nWrite;
+	LOGD("wakeAckWait\n");
     do {
         nWrite = write(waitPack->mWakeWritePipeFd, &cmd, 1);
     } while (nWrite == -1 && errno == EINTR);

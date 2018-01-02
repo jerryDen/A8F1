@@ -52,8 +52,8 @@ static int start(struct TimerOps* base)
 	    }
 	}
 	if(timerServer->loopTime <= 0 ){
-		it.it_interval.tv_sec =  9999; //此处设置0 定时器就不走了
-		it.it_interval.tv_nsec = 1;
+		it.it_interval.tv_sec =  0; 
+		it.it_interval.tv_nsec = 1;//此处设置0 定时器就不走了
 	}else{
 		it.it_interval.tv_sec =  (timerServer->loopTime/1000);
 	    it.it_interval.tv_nsec = (timerServer->loopTime%1000)*1000*1000LL;

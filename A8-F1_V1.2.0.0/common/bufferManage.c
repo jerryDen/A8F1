@@ -53,10 +53,9 @@ static int push(struct BufferOps* base,void * data,int len)
 	}
 	pthread_mutex_lock(&pthis->_mutex);
 	if(pthis->validLen + len  > pthis->bufferTotalLen){
-		if(pthis->bufferTotalLen+RESERVED < MAX_SIZE ){
-
-			pthis->buffer = realloc(pthis->buffer ,pthis->bufferTotalLen+RESERVED);
-			pthis->bufferTotalLen += RESERVED;
+		if(pthis->bufferTotalLen+len < MAX_SIZE ){
+			pthis->buffer = realloc(pthis->buffer ,pthis->bufferTotalLen+len);
+			pthis->bufferTotalLen += len;
 
 		}else
 		{
@@ -71,9 +70,7 @@ static int push(struct BufferOps* base,void * data,int len)
 	do {
 	     nWrite = write(pthis->wakeFds[1], &pushCmd, sizeof(pushCmd));
 	} while (nWrite == -1 );
-	return nWrite;
-fail1:
-	free(pthis);
+	return len;
 fail0:
 	return -1;
 }
