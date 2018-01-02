@@ -44,6 +44,9 @@ typedef struct WavParames{
 
 //static Thread_ID wavThreadID;
 static pThreadOps wavThreadID;
+static pthread_mutex_t wavThreadID_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+
 
 static void *playWavThread(void * arg);
 static ssize_t safe_read(int fd, void *buf, size_t count);
@@ -59,17 +62,17 @@ int wavPlaymusic(const char *name,int playTime,int volume)
 	 wavPlayarg.name = name;
 	 wavPlayarg.playTime = playTime;
 	 wavPlayarg.volume = volume;
-	 pthread_destroy(wavThreadID);
-	 if(wavThreadID)
+	 pthread_mutex_lock(&wavThreadID_mutex);
+	 if(wavThreadID != NULL)
 	 	pthread_destroy(&wavThreadID);
-
 	 wavThreadID =  pthread_register(playWavThread,&wavPlayarg,sizeof(WavPlayArg),NULL);
-	 if( wavThreadID)
+	 if( wavThreadID == NULL){
+	 	pthread_mutex_unlock(&wavThreadID_mutex);
 	 	goto fail0;
-	// wavThreadID = pthread_Create(playWavThread,&wavPlayarg,sizeof(WavPlayArg),NULL);
-	 //pthread_start(wavThreadID);
-	
+	 }
 
+	wavThreadID->start(wavThreadID);
+	pthread_mutex_unlock(&wavThreadID_mutex);
 	 return 0;
 fail0:
 	 return -1;
@@ -78,13 +81,15 @@ fail0:
 
 int wavStopPlay(void)
 {
-	return wavThreadID->stop(wavThreadID);
-	//return pthread_stop(wavThreadID);
+	pthread_mutex_lock(&wavThreadID_mutex);
+	pthread_destroy(&wavThreadID);
+	pthread_mutex_unlock(&wavThreadID_mutex);
 }
 int wavExit(void)
-{
+{	
+	pthread_mutex_lock(&wavThreadID_mutex);
 	 pthread_destroy(&wavThreadID);
-	//return pthread_destroy(wavThreadID);
+	 pthread_mutex_unlock(&wavThreadID_mutex);
 	return 0;
 }
 static unsigned int  calc_count(int sec,WavParames wavParames )
@@ -119,11 +124,11 @@ static void *playWavThread(void * arg)
 	pWavPlayArg wavArg = (pWavPlayArg)arg;
 	int pb_fd = -1;
 	WavParames wavParames;
-	unsigned char wav_pb_buf[1024] = {0};
+	unsigned char *wav_pb_buf = malloc(1024);
 	int dtawave,pb_count,loaded;
 	unsigned int  written = 0,r,c;
 	unsigned int chunk_bytes;
-	
+	bzero(wav_pb_buf,1024);
 	if(arg == NULL)
 		return NULL;
 	if ((pb_fd = open64(wavArg->name, O_RDONLY, 0)) == -1) {
@@ -153,11 +158,10 @@ static void *playWavThread(void * arg)
 		LOGE("not enough memory");
 		goto end;
 	}
-	
 start:
 	chunk_bytes = GetWavChunkBytes();
 	//while(pthread_checkRunState(wavThreadID) == Thread_Run){
-	while(wavThreadID->check(wavThreadID) == Thread_Runss){
+	while(wavThreadID&&wavThreadID->check(wavThreadID) == Thread_Run){
 		if(written >= pb_count){
 			break;
 		}
@@ -185,7 +189,7 @@ start:
 				goto end;
 			}
 			if (r == 0){
-				printf("wav file end, mute bytes: %u\n", (unsigned int)c);
+			//	printf("wav file end, mute bytes: %u\n", (unsigned int)c);
 				//返回到文件起始有效数据位置，准备从头再开始播放
 				lseek( pb_fd, -wavParames.pb_data_bytes, SEEK_CUR);
 				break;
@@ -199,6 +203,9 @@ start:
 	
 	}
 end:
+	LOGD("playWavThread exit!");
+	if(wav_pb_buf)
+		free(wav_pb_buf);
 	if (pb_fd > 0){
 		close(pb_fd);
 		pb_fd = -1;

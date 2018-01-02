@@ -11,6 +11,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include "queueBufLib.h"
+#define IS_DATA  1
+#define IS_EXIT  2
 
 
 typedef struct S_QueueHandlePack{

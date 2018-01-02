@@ -3,10 +3,9 @@
 #define LOCAL_NET_INFO_H__
 
 
-#include "udpServer.h"
 #include "commStructDefine.h"
 
-
+#define MULTICAST_GROUP	0xef000000	//239.0.0.0
 
 int setLocalNetInfo(T_Room localRoom);
 int getLocalIpaddr(void);

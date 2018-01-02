@@ -5,8 +5,9 @@
 
 #define QH_TAG "QUEUE_HANDLE"
 #define EPOLL_MAX_EVENTS 1
-static int  wakeQueueWait(int mWakeWritePipeFd);
-static void queueWaitToBeAwakened(	int mEpollFd,int mWakeReadPipeFd);
+static int  wakeQueueWait(int mWakeWritePipeFd,int ch);
+static int queueWaitToBeAwakened(	int mEpollFd,int mWakeReadPipeFd);
+
 pQueueHandlePack queueHandleInit(int dataTypeSize)
 {
 	int result;
@@ -37,7 +38,7 @@ pQueueHandlePack queueHandleInit(int dataTypeSize)
 
 
 	eventItem.data.fd = qHandlePack->mWakeReadPipeFd ;  
- 	eventItem.events = EPOLLIN | EPOLLET;
+ 	eventItem.events = EPOLLIN ;
 	result = epoll_ctl(qHandlePack->mEpollFd, EPOLL_CTL_ADD, qHandlePack->mWakeReadPipeFd, &eventItem);
 	CHECK_RET(result<0, "epoll_ctl", goto fail1);
 	
@@ -61,7 +62,7 @@ int pushDataToQueueHandle(pQueueHandlePack qHandlePack , const void *data,unsign
 	pthread_mutex_unlock(&qHandlePack->queueBufMutex);
 	
 	CHECK_RET(result<0, "fail to queue_push", goto fail0);
-	result = wakeQueueWait(qHandlePack->mWakeWritePipeFd);
+	result = wakeQueueWait(qHandlePack->mWakeWritePipeFd,IS_DATA);
 	CHECK_RET(result<0, "fail to  wakeQueueWait", goto fail0);
 
 	return 0;
@@ -72,9 +73,12 @@ fail0:
 int pullDataFromQueueHandle(pQueueHandlePack qHandlePack ,  void *data,unsigned int dataLen)
 {
 	pQueuNode qNode  = NULL;
-	while(queue_isEmpty(qHandlePack->queueBuf))
-	{
-		queueWaitToBeAwakened(qHandlePack->mEpollFd,qHandlePack->mWakeReadPipeFd);
+	while(queue_isEmpty(qHandlePack->queueBuf)){
+	
+		if( IS_EXIT == queueWaitToBeAwakened(qHandlePack->mEpollFd,qHandlePack->mWakeReadPipeFd)){
+
+			return IS_EXIT;
+		} 
 	}
 	pthread_mutex_lock(&qHandlePack->queueBufMutex);
 	qNode = queue_peek(qHandlePack->queueBuf);
@@ -91,26 +95,28 @@ int pullDataFromQueueHandle(pQueueHandlePack qHandlePack ,  void *data,unsigned 
  	return -1;
 }
 
-static void  queueWaitToBeAwakened(	int mEpollFd,int mWakeReadPipeFd)
+static int  queueWaitToBeAwakened(	int mEpollFd,int mWakeReadPipeFd)
 {
 	struct epoll_event eventItem;
 	int pollResult = epoll_wait(mEpollFd, &eventItem, EPOLL_MAX_EVENTS, -1);
-	char buffer[16];
+	int buffer[16];
     ssize_t nRead;
-    do {
-        nRead = read(mWakeReadPipeFd, buffer, sizeof(buffer));
-    } while ((nRead == -1 && errno == EINTR) || nRead == sizeof(buffer));
 	
+    do {
+        nRead = read(mWakeReadPipeFd, &buffer, sizeof(buffer));
+		//防止缓存中存有大量的数据,所以这里要保证一次性读完,以免下次不阻塞
+    } while ((nRead == -1 && errno == EINTR)||nRead == sizeof(buffer) );
+	return buffer[0];	
 }
-static int  wakeQueueWait(int mWakeWritePipeFd)
+static int  wakeQueueWait(int mWakeWritePipeFd,int       ch)
 {	
 	ssize_t nWrite;
     do {
-        nWrite = write(mWakeWritePipeFd, "W", 1);
+        nWrite = write(mWakeWritePipeFd, &ch, sizeof(ch));
     } while (nWrite == -1 && errno == EINTR);
 
-    if (nWrite != 1 && errno != EAGAIN) {
-        LOGE(QH_TAG,"Could not write wake signal, errno=%d", errno);
+    if (nWrite != sizeof(ch) && errno != EAGAIN) {
+        LOGE("Could not write wake signal, errno=%d", errno);
 		return -1;
     }
 	
@@ -120,9 +126,11 @@ void queueHandleExit(pQueueHandlePack * pack)
 {
 	if(pack	== NULL&&(*pack)->queueBuf == NULL)
 		return ;
+	wakeQueueWait((*pack)->mWakeWritePipeFd,IS_EXIT);
 	pthread_mutex_lock(&(*pack)->queueBufMutex);
-	
+		
 	queue_destroy(&((*pack)->queueBuf));
+	
 	
 	pthread_mutex_unlock(  &(*pack)->queueBufMutex );
 	free((*pack));

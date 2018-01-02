@@ -21,6 +21,7 @@ int getLocalRoom(pT_Room room);
 int getRoomIpAddr(T_Room Romm, uint32_t *ipAddr );
 int getLocalSequence(void);
 
+void cellInfoExit(void);
 
 
 

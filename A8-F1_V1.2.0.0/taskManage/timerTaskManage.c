@@ -1,5 +1,5 @@
-#include "taskManage/timerTaskManage.h"
-#include "common/debugLog.h"
+#include "timerTaskManage.h"
+#include "DebugLog.h"
 typedef struct  TimerServer{
 		TimerOps ops;
 		timer_t timerid;

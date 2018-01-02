@@ -10,13 +10,13 @@
 #include <sys/eventfd.h>
 #include <pthread.h>
 #include "bufferManage.h"
-#include "debugLog.h"
+#include "DebugLog.h"
 
 
-#define RESERVED (1024)
+#define RESERVED (512)
 #define AUGMENT_SIZE 512
 
-#define MAX_SIZE (4*1024)
+#define MAX_SIZE (2*1024)
 
 typedef struct BufferServer{
 	BufferOps ops;
@@ -127,7 +127,7 @@ static int deleteLeft(struct BufferOps* base ,int offset)
 		goto fail0;
 	}
 	pthread_mutex_lock(&pthis->_mutex);
-	offset = offset>pthis->validLen?pthis->validLen:offset;
+	offset = offset > pthis->validLen?pthis->validLen:offset;
 	memset(pthis->buffer,0,offset);
 	memcpy(pthis->buffer,pthis->buffer+offset,pthis->validLen-offset );
 	if(pthis->bufferTotalLen - pthis->validLen > RESERVED)
@@ -223,6 +223,7 @@ void destroyBufferServer(pBufferOps *base)
 		return;
 	}
 	do{
+		exitWait(*base);
 		LOGE("WAIT EXIT!!!!!!!!!!!!");
 		pthread_mutex_lock(&pthis->_mutex);
 		if(pthis->isExit == 1){
@@ -231,7 +232,7 @@ void destroyBufferServer(pBufferOps *base)
 			break;
 		}
 		pthread_mutex_unlock(&pthis->_mutex);
-		exitWait(*base);
+		
 		usleep(10*1000);
 		if(timeOut++ >100){
 			LOGE("fail to destroyBufferServer timeout!");

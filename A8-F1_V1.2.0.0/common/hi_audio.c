@@ -16,6 +16,8 @@
 #include <pthread.h>
 #include <errno.h>
 #include <signal.h>
+#include <time.h>
+
 #include <stdint.h>
 #include "sample_comm.h"
 #include "acodec.h"
@@ -23,6 +25,7 @@
 #include "systemConfig.h"
 //#include "us_cam_audio.h"
 #include "uscam_audio.h"
+#include "commonHead.h"
 
 #ifdef __cplusplus
 #if __cplusplus
@@ -236,7 +239,7 @@ HI_S32 us_wavWritePcm(HI_VOID *buf, HI_U32 bytes )
 
 	while(i >= wavChunkSize)
 	{
-
+		
 		s32Ret = UsCamAudioPlay(buf,i);
 		if(s32Ret != HI_SUCCESS)
 		{
@@ -246,7 +249,6 @@ HI_S32 us_wavWritePcm(HI_VOID *buf, HI_U32 bytes )
 		i -= wavChunkSize;
 		buf = (char*)buf + wavChunkSize;	
 	}
-
 	return HI_SUCCESS;
 }
 
@@ -439,7 +441,7 @@ HI_U32 talkWritePcm( HI_VOID *buf, HI_U32 bytes )
 {
 	HI_S32 s32Ret= HI_SUCCESS;
 	AUDIO_FRAME_S stFrame;
-	
+	int userLen = 0;
 	stFrame.enBitwidth  = FORMAT;
 	if( CHANNELS == 1 ) stFrame.enSoundmode = AUDIO_SOUND_MODE_MONO;
 	else stFrame.enSoundmode = AUDIO_SOUND_MODE_STEREO;
@@ -452,28 +454,20 @@ HI_U32 talkWritePcm( HI_VOID *buf, HI_U32 bytes )
 
 	while( bytes >= talkChunkSize ){
 		stFrame.pVirAddr[0] = p;
-//		stFrame.pVirAddr[1] = p;
-		#if 1
-		//ÊÕµ½Êý¾Ý¾Í²¥·Å
+
 		
 		UsCamAudioPlay(stFrame.pVirAddr[0],talkChunkSize);
-		#else
-		vqePendingPlayProcessFrameEC(stFrame.pVirAddr[0],talkChunkSize);
-		
-		
-		s32Ret = HI_MPI_AO_SendFrame(AoDev, AoChn, &stFrame, HI_TRUE);
-		if( s32Ret != HI_SUCCESS ){
-			SAMPLE_DBG(s32Ret);
-		}
-		#endif
+		userLen += talkChunkSize;
+
 		
 		bytes -= talkChunkSize;
 		p += talkChunkSize;
+		//usleep(100*1000);
 	}
-	if( (p != buf) && bytes ){
-		memcpy(buf, p, bytes);
-	}
-	return bytes;
+//	if( (p != buf) && bytes ){
+//		memcpy(buf, p, bytes);
+//	}
+	return userLen;
 }
 
 

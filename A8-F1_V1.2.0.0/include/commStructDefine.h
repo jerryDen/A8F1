@@ -21,8 +21,8 @@
 
 
 
-#define false 0
-#define true 1
+//#define false 0
+//#define true 1
 
 /*---------X6B,A8,ç³»ç»Ÿå…¬ç”¨ï¼Œéœ€ä¿æŒä¸€è‡´.-------BEGING------*/
 //const uint8_t ESC = 0x7d;
@@ -279,6 +279,25 @@ typedef struct {
 	uint32_t size;			//ÎÄ¼ş´óĞ¡ ×Ö½Ú
 	uint32_t serverip;		//ÖÃ0£¬±íÊ¾´Ó·¢³öÃüÁîµÄPC×÷Îª·şÎñÆ÷ÏÂÔØtftp
 }T_TFTP_UPDATE;
+
+
+
+typedef struct {
+	#define UDP_BUF_MAXSIZE 1024
+	unsigned char buf[UDP_BUF_MAXSIZE];
+	int len;
+	int offset;
+} MsgBody, *pMsgBody;
+
+typedef struct S_NetDataPackage{
+	int sockfd;
+	struct sockaddr_in remoteInfo;
+	void* sendServer;
+	MsgBody dataBody;
+}S_NetDataPackage,*pS_NetDataPackage;
+
+
+
 
 
 

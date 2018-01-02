@@ -22,11 +22,17 @@
 #include <signal.h>
 #include <time.h>
 #include <setjmp.h>
-#include "taskManage/threadManage.h"
-#include "common/bufferManage.h"
-#include "common/debugLog.h"
-#include "common/Utils.h"
-#include "common/netUdpServer.h"
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdint.h>
+
+#include "threadManage.h"
+#include "bufferManage.h"
+#include "DebugLog.h"
+#include "Utils.h"
+#include "netUdpServer.h"
 typedef struct SerialServer{
 	UdpOps ops; //提供给外部访问的虚函数表
 	int socketFd; //打开串口时的设备节点
@@ -52,6 +58,10 @@ static int  socketBind(const int sockfd, const int port);
 static int  _setNoblock(int fd, int bNoBlock);
 static int  _ack (struct UdpOps* base,unsigned char * data ,int size);
 static int joinMulticast(struct UdpOps* base,unsigned int multiaddr);
+static int getRemoteInfo(struct UdpOps* base,struct sockaddr_in *remoteInfo);
+static int _setsockopt(struct UdpOps* base, int level, int optname,const void *optval, socklen_t optlen);
+static int setRemoteInfo(struct UdpOps* base,struct sockaddr_in remoteInfo);
+
 
 static UdpOps ops = {
 		.setHandle = setHandle,
@@ -59,6 +69,9 @@ static UdpOps ops = {
 		.ack   =  _ack,
 		.write =  _udpWrite,
 		.joinMulticast = joinMulticast,
+		.getRemoteInfo = getRemoteInfo,
+		.setRemoteInfo = setRemoteInfo,
+		.setsockopt = _setsockopt,
 };
 static  void * udpRecvThreadFunc(void *arg)
 {
@@ -68,7 +81,7 @@ static  void * udpRecvThreadFunc(void *arg)
 	struct epoll_event ev, events[EVENT_NUMS];
 	char readBuff[1024] = {0};
 	pUdpServer udpServer  =*((pUdpServer*)arg);
-	LOGE("udpRecvThreadFunc");
+	LOGD("udpRecvThreadFunc");
 	if(udpServer == NULL)
 	{
 		goto exit;
@@ -92,7 +105,7 @@ static  void * udpRecvThreadFunc(void *arg)
 	while(udpServer->recvThreadId->check(udpServer->recvThreadId))
 	{
 		nfds = epoll_wait(epfd, events, EVENT_NUMS, -1);
-		LOGE("收到数据");
+		
 		int i;
 		for (i = 0; i < nfds; ++i) {
 			if (events[i].data.fd == udpServer->socketFd)
@@ -102,10 +115,12 @@ static  void * udpRecvThreadFunc(void *arg)
 				bzero(readBuff,sizeof(readBuff));
 			//	readLen = _read(udpServer->socketFd,readBuff,sizeof(readBuff));
 				readLen =  recvfrom(udpServer->socketFd,readBuff, sizeof(readBuff), 0,
-						&udpServer->remoteInfo, (socklen_t*)&sockaddrLen);
+						(struct sockaddr*)&udpServer->remoteInfo, (socklen_t*)&sockaddrLen);
 				//加入队列
 				if( readLen > 0 )
+				{	
 					udpServer->bufferOps->push(udpServer->bufferOps,readBuff,readLen);
+				}
 				else{
 					LOGE("fail to _read serialDevFd");
 				}
@@ -116,7 +131,7 @@ static  void * udpRecvThreadFunc(void *arg)
 		}
 	}
 exit:
-	LOGE("serialRecvThreadFunc exit!");
+	LOGE("udpRecvThreadFunc exit!");
 	return NULL;
 }
 
@@ -128,12 +143,12 @@ static  void * UdpParseThreadFunc(void *arg)
 		goto exit;
 	}
 	int ret = 0;
-	char recvBuf[1024] = {0};
-	char validBuf[1024] = {0};
-	int  recvLen;
+	char recvBuf[2046] = {0};
+	char validBuf[2046] = {0};
+	int  recvLen = 0;
 	int  pullLen = 0;
 	int  validLen;
-	LOGE("UdpParseThreadFunc");
+	LOGD("UdpParseThreadFunc");
 	while(udpServer->recvThreadId->check(udpServer->recvThreadId))
 	{
 		//读取队列数据
@@ -141,7 +156,6 @@ static  void * UdpParseThreadFunc(void *arg)
 		ret = udpServer->bufferOps->wait(udpServer->bufferOps);
 		switch(ret){
 			case TRI_DATA:
-				LOGE("TRI_DATA");
 					do{
 						bzero(recvBuf,sizeof(recvBuf));
 						bzero(validBuf,sizeof(validBuf));
@@ -151,7 +165,7 @@ static  void * UdpParseThreadFunc(void *arg)
 							if(udpServer->recvFunc)
 							{
 								if(udpServer->parseFunc ){
-									recvLen = udpServer->parseFunc(recvBuf,recvLen,validBuf,&validLen);
+									recvLen = udpServer->parseFunc(recvBuf,pullLen,validBuf,&validLen);
 									if((recvLen >0) )
 									{
 										if( validLen>0 ){
@@ -167,7 +181,8 @@ static  void * UdpParseThreadFunc(void *arg)
 										}
 									}
 								}else {
-									recvLen = udpServer->recvFunc(recvBuf,recvLen);
+									
+									recvLen = udpServer->recvFunc(recvBuf,pullLen);
 									if(recvLen >0)
 									{
 										ret = udpServer->bufferOps->deleteLeft(udpServer->bufferOps,recvLen);
@@ -189,7 +204,7 @@ static  void * UdpParseThreadFunc(void *arg)
 		}
 	}
  exit:
-	LOGE("serialRecvThreadFunc exit!");
+	LOGE("UdpParseThreadFunc exit!");
 	return NULL;
 }
 
@@ -200,7 +215,6 @@ static int setHandle(struct UdpOps* base,UDPRecvFunc recvFunc,
 	pUdpServer udpServer = (pUdpServer)base;
 	if(udpServer == NULL)
 				goto fail0;
-	LOGE("setHandle!");
 	udpServer->parseThreadId = pthread_register(UdpParseThreadFunc,&udpServer,
 			sizeof(pUdpServer),NULL);
 	if(udpServer->parseThreadId == NULL)
@@ -238,8 +252,8 @@ static int  _ack (struct UdpOps* base,unsigned char * data ,int size)
 	pUdpServer udpServer = (pUdpServer)base;
 	if(udpServer == NULL)
 				goto fail0;
-
-	return _udpWrite(base,data,size,udpServer->remoteInfo.sin_addr.s_addr
+	
+	return _udpWrite(base,data,size,(udpServer->remoteInfo.sin_addr.s_addr)
 			,ntohs(udpServer->remoteInfo.sin_port));
 fail0:
 	return -1;
@@ -358,9 +372,16 @@ pUdpOps createUdpServer(int netPort)
 	fail0:
 		return NULL;
 }
+static int _setsockopt(struct UdpOps* base, int level, int optname,const void *optval, socklen_t optlen)
+{
+	pUdpServer	udpServer  = (pUdpServer)base;
+		if(udpServer == NULL)
+				return -1;
+	return setsockopt(udpServer->socketFd,level,optname,optval,optlen);
+}
 static int _udpWrite(struct UdpOps* base, const char * data, int size,
 		uint32_t ipAddr, int port) {
-	int ret;
+	int ret,i;
 	struct sockaddr_in remote_addr;
 	pUdpServer	udpServer  = (pUdpServer)base;
 			if(udpServer == NULL)
@@ -368,12 +389,12 @@ static int _udpWrite(struct UdpOps* base, const char * data, int size,
 	remote_addr.sin_family = AF_INET;
 	remote_addr.sin_port = htons(port); //htons
 	remote_addr.sin_addr.s_addr = ipAddr;
-	bzero(&(remote_addr.sin_zero),sizeof(remote_addr.sin_zero));
+	bzero(&(remote_addr.sin_zero),sizeof(remote_addr.sin_zero));	
 
 	ret = sendto(udpServer->socketFd, data, size, 0, (struct sockaddr*) &remote_addr,
 				(socklen_t) sizeof(struct sockaddr));
 	if (ret == -1) {
-	LOGE("writeDatagram  failed:%s\n", strerror(errno));
+		LOGE("writeDatagram  failed:%s\n", strerror(errno));
 	}
 	return ret;
 }
@@ -398,6 +419,27 @@ static int udp_getSocketFd(int bandPort)
 	}
 
 }
+static int setRemoteInfo(struct UdpOps* base,struct sockaddr_in remoteInfo)
+{
+	pUdpServer	udpServer  = (pUdpServer)base;
+		if(udpServer == NULL)
+			return -1;
+	udpServer->remoteInfo = remoteInfo;
+	return 0;
+	
+}
+
+static int getRemoteInfo(struct UdpOps* base,struct sockaddr_in *remoteInfo)
+{
+		pUdpServer	udpServer  = (pUdpServer)base;
+		if(udpServer == NULL||remoteInfo == NULL)
+			return -1;
+		if(udpServer->remoteInfo.sin_addr.s_addr == 0)
+			return -1;
+		*remoteInfo  = udpServer->remoteInfo;
+	
+		return 0;
+}
 static int joinMulticast(struct UdpOps* base,unsigned int multiaddr)
 {
 		pUdpServer	udpServer  = (pUdpServer)base;
@@ -408,7 +450,7 @@ static int joinMulticast(struct UdpOps* base,unsigned int multiaddr)
 		mreq.imr_interface.s_addr = htonl(INADDR_ANY);		
 		if( setsockopt( udpServer->socketFd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq) ) < 0){
 			LOGE("IP_ADD_MEMBERSHIP\n");
-			return -1;
+			//return -1;
 		}
 		int on = 1;
 		//设置允许发生广播
@@ -419,13 +461,13 @@ static int joinMulticast(struct UdpOps* base,unsigned int multiaddr)
 		if(setsockopt(udpServer->socketFd,IPPROTO_IP,IP_MULTICAST_IF,&mreq.imr_multiaddr,sizeof(mreq.imr_multiaddr)) < 0)
 		{
 			LOGE("IP_MULTICAST_IF\n");
-			return -1;
+			//return -1;
 		}
 		int loop = 0;
 		if(setsockopt(udpServer->socketFd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) < 0)
 		{
 			LOGE("IP_MULTICAST_LOOP\n");
-			return -1;
+			//return -1;
 		}
 		return 0;
 }
@@ -446,7 +488,10 @@ static int socketBind(const int sockfd, const int port) {
 	}
 	return true;
 }
-
+static int   eventfd_write(int fd, const uint64_t counter)
+{
+	return write(fd, &counter, sizeof(uint64_t));
+}
 
 void destroyUdpServer(pUdpOps * server)
 {

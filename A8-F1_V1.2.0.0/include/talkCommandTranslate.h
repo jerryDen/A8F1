@@ -48,20 +48,17 @@ typedef int  (*pTalkCallBackFuncTion)(T_Room , unsigned char ,const   unsigned c
 
 
 int talkCommandInit(T_Room room);
-
+T_eTALK_STATUS talkGetWorkState(void);
 int talkSetCallBackFunc(pTalkCallBackFuncTion callBackFunc);
-
-int talkTranslateCmdToDestWaitAck(T_Room destRoom , unsigned char cmd,const   uchar * pData, int len );
-int talkTranslateCmdToDestNotWaitAck(T_Room destRoom , unsigned char cmd,unsigned char ackType,const   unsigned char * pData, int len );
-
 int talkTranslateAnswerOrHuangUp(T_Room             destRoom);
 int talkTranslateHuangUp(T_Room               destRoom);
+int userSingleServerSendDataToDestRoom(T_Room destRoom , unsigned char cmd,const   unsigned char * pData, int len);
 
 int callManager(void);
 int openLock(T_Room destRoom);
 
 
-int talkCommandExit(void);
+void talkCommandExit(void);
 
 
 #endif

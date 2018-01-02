@@ -1,6 +1,8 @@
 
 #ifndef __SERIAL_SERVER_H_
 #define __SERIAL_SERVER_H_
+#include <netinet/in.h>
+
 /*功能：有效数据上报回调
  * 参数1：数据地址
  * 参数2：数据长度
@@ -55,6 +57,9 @@ typedef struct UdpOps{
 	int (*write)(struct UdpOps* , const char * , int ,
 			uint32_t , int );
 	int (*joinMulticast)(struct UdpOps*,unsigned int );
+	int (*getRemoteInfo)(struct UdpOps*,struct sockaddr_in *);
+	int (*setRemoteInfo)(struct UdpOps*,struct sockaddr_in );
+	int (*setsockopt)(struct UdpOps* , int , int ,const void *, socklen_t);
 }UdpOps,*pUdpOps;
 /*
 * createUdpServer：创建UDP服务

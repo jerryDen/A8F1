@@ -33,7 +33,7 @@
 #include <sys/ioctl.h>
 
 #include "Utils.h"
-#include "debugLog.h"
+#include "DebugLog.h"
 
 #define DEBUGLEVEL 7
 
@@ -165,11 +165,12 @@ static int charToInt(char s) {
 }
 static void printData(char *buf, int len) {
 	int i,j = 0;
-	char *buffer = malloc(len*6+5);
-	bzero(buffer,len*5+1);
+	char *buffer = malloc(len*7+1);
+	bzero(buffer,len*7+1);
 	for(i = 0; i<len;i++)
 	{
 		j += sprintf(&buffer[j],"0x%-2x ",buf[i]);
+		
 	}
 	LOGD("%s",buffer);
 	free(buffer);

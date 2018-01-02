@@ -15,15 +15,15 @@ typedef enum E_KEY_STATE{
 #define OPEN_LOCK       2
 
 
-#define MQ_ALARM        KEY_D 
+#define MQ_ALARM        KEY_E 
 #define HW_ALARM		KEY_A
-#define YW_ALARM        KEY_E 
+#define YW_ALARM        KEY_D
 #define JJ_ALARM        KEY_B 
 #define MC_ALARM        KEY_C
 
 
-#define KEY_UP     0
-#define KEY_DOWN   1
+#define KEY_STATE_UP     0
+#define KEY_STATE_DOWN   1
 
 
 typedef void (*CallBackFuntion)(int, int,int);

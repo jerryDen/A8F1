@@ -57,6 +57,8 @@
 #define     HEARTBEAT       		0X09 //心跳包
 #define     HEARTBEAT_TIME_OUT      0x10 //心跳包超时
 
+#define     REBOOT_CMD				0x0A
+
 #define     INTERNET_CALL_CMD		0xE0 //add by alvin
 #define 	SMS_CMD					0XE1
 #define 	CALL_CMD				0XE2

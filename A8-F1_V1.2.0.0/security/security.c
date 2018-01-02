@@ -8,7 +8,13 @@
 
 
 
-#define ALARM_INTERVAL_TIME 10   //安防触发间隔时间
+#define ALARM_INTERVAL_TIME 180   //安防触发间隔时间
+
+
+typedef enum E_SECURITY_MODE{
+		MODE_FREE = 0,
+		MODE_LAYOUT,
+}E_SECURITY_MODE;
 static void security_sendMsgToManager(void *arg);
 static void security_triggerAlarmTinkle(void *arg);
 static int  sendAlarmToManager(int         type);
@@ -24,6 +30,7 @@ static TimerID alarm_ringdown_TimerId;
 static TimerID alarm_sendMsg_TimerId;
 static TimerID alarm_state_TimerId;
 */
+static E_SECURITY_MODE securityMode;
 static pTimerOps alarm_ringdown_TimerId;
 static pTimerOps alarm_sendMsg_TimerId;
 static pTimerOps alarm_state_TimerId;
@@ -36,8 +43,7 @@ int security_init(pSecurityCallBackFuncTion       callbackFunc)
 {
 	int ret;
 	
-	
-	securityState = getSecurityMode();
+	securityMode = getSecurityMode();
 	LOGD("securityState = %d\n",securityState);
 	upSecurityMsgToUi = callbackFunc;
 
@@ -47,15 +53,21 @@ fail0:
 }
 int security_layoutAlarm(void)
 {
-	securityState = E_ALAEM_SLEEP;
- 	return 	setSecurityMode(E_ALAEM_SLEEP);
+	if(securityMode == MODE_LAYOUT )
+		return -1;
+	securityMode = MODE_LAYOUT;
+ 	setSecurityMode(securityMode);
+	upSecurityMsgToUi(UI_ALARM_LAYOUT,NULL,0);
 }
 
 int security_repealAlarm(void)
 {
-	securityState = E_ALAEM_NOT_ACTIVITY;
-
-	return 	setSecurityMode(E_ALAEM_NOT_ACTIVITY);
+	if(securityMode == MODE_FREE )
+		return -1;
+	securityMode = MODE_FREE;
+	security_stopAlarm();
+	setSecurityMode(securityState);
+	upSecurityMsgToUi(UI_ALARM_REPEAL,NULL,0);
 }
 
 int security_delaySendAlarm(int         type)
@@ -63,6 +75,8 @@ int security_delaySendAlarm(int         type)
 	
 	struct timespec  current_time;
 	static struct timespec	last_time;
+	const char *securityStateStr[] = {"E_ALAEM_SLEEP","E_ALARM_READY","E_ALARM_RUNING"};
+		
 	clock_gettime(CLOCK_MONOTONIC, &current_time);
 		//180S内只能报警一次
 	if ((current_time.tv_sec - last_time.tv_sec)<ALARM_INTERVAL_TIME)
@@ -71,12 +85,22 @@ int security_delaySendAlarm(int         type)
 			return -1;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &last_time);
-
-	if( (type != E_JJ_ALARM) && (securityState == E_ALAEM_NOT_ACTIVITY)||(securityState == E_ALARM_RUNING ))
+	if(securityMode == MODE_FREE )
+	{
+		LOGD("securityMode == MODE_FREE ");
 		return -1;
+	}
+	if( (type != E_JJ_ALARM) && (securityState != E_ALAEM_SLEEP )){
+		LOGD("securityState = %s",securityStateStr[securityState]);
+		return -1;
+	}
 
 	//延时后产生报警铃声
-	alarm_ringdown_TimerId = createTimerTaskServer(ALAEM_DELAY_TIME,40*1000,3,security_triggerAlarmTinkle
+	if(alarm_ringdown_TimerId )
+	{
+		destroyTimerTaskServer(&alarm_ringdown_TimerId);
+	}
+	alarm_ringdown_TimerId = createTimerTaskServer(ALAEM_DELAY_TIME,40*1000,3,security_triggerAlarmTinkle,
 							&type,sizeof(type));
 	alarm_ringdown_TimerId->start(alarm_ringdown_TimerId);
 	
@@ -85,7 +109,8 @@ int security_delaySendAlarm(int         type)
 
 						   
 	//延时后发送报警信号
-	alarm_sendMsg_TimerId = createTimerTaskServer(ALAEM_DELAY_TIME,0,1,security_sendMsgToManager
+	LOGD("延时后报警");
+	alarm_sendMsg_TimerId = createTimerTaskServer(ALAEM_DELAY_TIME,0,1,security_sendMsgToManager,
 							&type,sizeof(type));
 	alarm_sendMsg_TimerId->start(alarm_sendMsg_TimerId);
 
@@ -111,18 +136,28 @@ int security_promptlySendAlarm(int        type)
 		return -1;
 	}
 	clock_gettime(CLOCK_MONOTONIC, &last_time);
-	
+	if(securityState != E_ALAEM_SLEEP ){
+		LOGD("securityState IS not E_ALAEM_SLEEP! \n ");
+		return -1;
+	}
+		
 	if( type == E_JJ_ALARM)
 	{
 		//只上报一次
 		security_triggerAlarmTinkle(&type);
 	}else {
-		if((securityState == E_ALAEM_NOT_ACTIVITY )||(securityState == E_ALARM_RUNING ) ){
-			LOGD("securityState = %d",securityState);
+		if((securityMode == MODE_FREE ) ){
+			
 			return -1;
 		}
 		//每隔40上报一次，总上报3次
-		alarm_ringdown_TimerId->changeParameter(alarm_ringdown_TimerId,0,40*1000,3);
+
+		if(alarm_ringdown_TimerId)
+		{
+			destroyTimerTaskServer(&alarm_ringdown_TimerId);
+		}
+		alarm_ringdown_TimerId = createTimerTaskServer(0,40*1000,3,security_triggerAlarmTinkle,
+							&type,sizeof(type));
 		alarm_ringdown_TimerId->start(alarm_ringdown_TimerId);
 	}
 	//只发送一次
@@ -132,9 +167,8 @@ int security_promptlySendAlarm(int        type)
 
 int security_stopAlarm(void)
 {
-	int ret;
-	if(securityState == E_ALAEM_NOT_ACTIVITY)
-		return -1;
+	if( securityState == E_ALAEM_SLEEP)
+		return 0;
 	securityState = E_ALAEM_SLEEP;
 	upSecurityMsgToUi(UI_ALARM_STOP,NULL,0);
 	
@@ -163,15 +197,18 @@ static void security_sendMsgToManager(void *arg)
 	if(arg == NULL)
 		return;
 	int type = *((int *)arg);
+	LOGD("发送报警");
 	sendAlarmToManager(type);
 }
 static void security_setAlarmState(void *arg)
 {
+	const char *securityStateStr[] = {"E_ALAEM_SLEEP","E_ALARM_READY","E_ALARM_RUNING"};
 	if(arg == NULL)
 		return;
+	
 	int type = *((int *)arg);
 	switch(type){
-		case E_ALAEM_NOT_ACTIVITY :
+		
 		case E_ALARM_READY:
 		case E_ALARM_RUNING:
 				securityState = type;
@@ -181,17 +218,22 @@ static void security_setAlarmState(void *arg)
 				securityState = type;
 			break;
 		default:
-			break;
+			return ;
 	}
-	LOGD("security_setAlarmState = %d\n",type);
+	LOGD("security_setAlarmState = %s\n",securityStateStr[type]);
 			
 }
 static void security_triggerAlarmTinkle(void *arg)
 {
 	static int upCount  = 0;
+	const char *securityTypeStr[] = {"E_MQ_ALARM","E_HW_ALARM","E_MC_ALARM","E_YW_ALARM","E_JJ_ALARM"};
+
 	if(arg == NULL)
 		return;
-	int type = E_ALAEM_SLEEP;
+	
+	int type = (*(int *)arg);
+	int state = E_ALAEM_SLEEP;
+	LOGD("Alarmtype = %s\n",securityTypeStr[type]);
 	if(type != E_JJ_ALARM ){
 		securityState = E_ALARM_RUNING;
 		//timer_taskDestroy(alarm_state_TimerId);
@@ -202,7 +244,7 @@ static void security_triggerAlarmTinkle(void *arg)
 		//				   ,&type,sizeof(type));
 		//这里有0.5/40的几率会产生BUG
 		alarm_state_TimerId = createTimerTaskServer(39500,0,1,security_setAlarmState
-					   ,&type,sizeof(type));
+					   ,&state,sizeof(state));
 	}
 	upSecurityMsgToUi(UI_ALARM_TRIGGER,arg,sizeof(int));
 	
@@ -216,15 +258,19 @@ static int sendAlarmToManager(int         type)
 	{
 		case E_MQ_ALARM :
 			buildAlarmEvent(&alarmEvent,MQ_EVENT);
+			alarmEvent.room.room = EVENT_PLACE_CF;
 			break;
 		case E_HW_ALARM:
 			buildAlarmEvent(&alarmEvent,HW_EVENT);
+			alarmEvent.room.room = EVENT_PLACE_WS;
 			break;
 		case E_YW_ALARM:
 			buildAlarmEvent(&alarmEvent,YW_EVENT);
+			alarmEvent.room.room = EVENT_PLACE_CF;
 			break;
 		case E_JJ_ALARM:
 			buildAlarmEvent(&alarmEvent,JJ_EVENT);
+			alarmEvent.room.room = EVENT_PLACE_KT;
 			break;
 		case E_MC_ALARM:
 			buildAlarmEvent(&alarmEvent,MC_EVENT);
@@ -244,8 +290,8 @@ static int  buildAlarmEvent(p_event_record_t alarmEvent,int type)
 	int ret;
 	struct timespec tp;
 	clock_gettime(CLOCK_REALTIME,&tp);
-	alarmEvent->type =  htonl(type);
-	alarmEvent->id = htonl(0);
+	alarmEvent->type = type;
+	alarmEvent->id = htonl(1);
 	alarmEvent->time = htonl(tp.tv_sec);   
 	ret = getLocalRoom(&alarmEvent->room);
 	CHECK_RET(ret < 0, "fail to getLocalRoom", goto fail0);

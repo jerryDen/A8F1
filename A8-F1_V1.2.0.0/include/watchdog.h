@@ -5,6 +5,8 @@
 
 int openWTD(void);
 void keepWTDalive(int dummy);
+void closeWTD(void);
+
 
 #endif
 

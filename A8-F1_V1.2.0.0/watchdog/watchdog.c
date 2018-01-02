@@ -31,4 +31,9 @@ void keepWTDalive(int dummy)
 
 	ioctl(wtd_fd, WDIOC_SETTIMEOUT, &dummy);
 }
+void closeWTD(void)
+{
+	if(wtd_fd > 0)
+		close(wtd_fd);
+}
 

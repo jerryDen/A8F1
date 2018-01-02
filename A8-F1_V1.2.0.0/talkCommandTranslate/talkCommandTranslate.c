@@ -10,14 +10,14 @@
 #include "commonHead.h"
 #include "talkCommandTranslate.h"
 #include "commandWord.h"
-#include "commNetConfig.h"I
+#include "commNetConfig.h"
 #include "timerTaskManage.h"
 #include "cellInformation.h"
 #include "localNetInfo.h"
 #include "systemConfig.h"
 #include "security.h"
-
 #include "netUdpServer.h"
+#include "threadManage.h"
 typedef struct  StateMachinePack{
 	T_eTALK_STATUS	tackState;
 	T_Room destRoom; 
@@ -38,6 +38,7 @@ typedef struct AckWakePack{
 }AckWakePack,*pAckWakePack;
 
 
+#define HEARTBEAT_TIME 10*60*1000 //每隔10分钟发送一次心跳
 
 pUdpOps udpSingleServer;
 
@@ -84,8 +85,7 @@ static int  udpSingleRecvCallBack (unsigned char* ,unsigned int);
 
 static  int udpMulitRecvCallBack(unsigned char* data,unsigned int len);
 
-static int  ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len);
-
+static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len, pUdpOps udpserver);
 static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len,pUdpOps udpServer);
 
 
@@ -96,11 +96,16 @@ static void mySleep(int time);
 
 
 
+static int talkTranslateCmdToDestWaitAck(pUdpOps sendServer,T_Room destRoom , unsigned char cmd,const   unsigned char * pData, int len );
+static int talkTranslateCmdToDestNotWaitAck(pUdpOps sendServer,T_Room destRoom, unsigned char cmd,unsigned char ackType,const   unsigned char * pData, int len );
+
 
 
 //分机管理服务
 
-static int sendMulitCmd(unsigned cmd);
+
+static int sendMulitCmd(unsigned cmd ,T_Room destRoom);
+
 
 
 static pUdpOps udpMulticastServer;
@@ -119,11 +124,6 @@ heart_beat_t heartbeatPack;
 
 static void sendHeartbeat(void *arg);
 static int initHeartbeatPack(p_heart_beat_t heartbeatPack );
-
-
-
-
-
 
 
 
@@ -154,8 +154,8 @@ int talkCommandInit(T_Room room)
 
 
 	
-	//超时应答2000ms后从发
-	ackWakeCmdPack = waitAckPackInit(2000);
+	//超时应答3000ms后从发
+	ackWakeCmdPack = waitAckPackInit(3000);
 	stateMachinePack = stateMachineInit();
 	
 	udpDataSendQueueHead = queueHandleInit(sizeof(S_NetDataPackage));
@@ -173,10 +173,11 @@ int talkCommandInit(T_Room room)
 	//创建组播服务
 		udpMulticastServer  = createUdpServer(COMM_MULIT_PORT);
 		CHECK_RET(udpMulticastServer == NULL, "fail to createUdpServer COMM_MULIT_PORT", goto fail0);
+		udpMulticastServer->joinMulticast(udpMulticastServer,localNetInfo.multiaddr);
 	//将处理函数加入到组播服务中,有数据时会调用udpMulitRecvCallBack
 		udpMulticastServer->setHandle(udpMulticastServer,udpMulitRecvCallBack,NULL,NULL);
 
-		udpMulticastServer->joinMulticast(udpMulticastServer,localNetInfo.multiaddr);
+		
 		
 
 
@@ -199,8 +200,9 @@ int talkCommandInit(T_Room room)
 	LOGD("seq:%d",getLocalSequence());
 	
 
-	sendHeartbeatTimerId = createTimerTaskServer(getLocalSequence()%20*1000,10*1000,-1,
+	sendHeartbeatTimerId = createTimerTaskServer(getLocalSequence()%20*1000,HEARTBEAT_TIME,-1,
 		sendHeartbeat,&heartbeatPack,sizeof(heartbeatPack));
+	sendHeartbeatTimerId->start(sendHeartbeatTimerId);
 	
 	return 0;
 fail0:
@@ -227,9 +229,8 @@ static void sendHeartbeat(void *arg)
 {
 	T_Room  managerRom;
 	getManagerRoom(&managerRom);
-	talkTranslateCmdToDestNotWaitAck(managerRom ,HEARTBEAT,NOT_ACK,&heartbeatPack,sizeof(heart_beat_t));
+	talkTranslateCmdToDestNotWaitAck(udpSingleServer,managerRom ,HEARTBEAT,NOT_ACK,&heartbeatPack,sizeof(heart_beat_t));
 }
-
 static void mySleep(int time)
 {
 	int current  = time;
@@ -243,7 +244,7 @@ int talkSetCallBackFunc(pTalkCallBackFuncTion callBackFunc)
 	upCmdtoUiFunction = callBackFunc;
 	return 0;
 }
-int talkTranslateCmdToDestNotWaitAck(T_Room destRoom , unsigned char cmd,unsigned char ackType,const   unsigned char * pData, int len )
+int talkTranslateCmdToDestNotWaitAck(pUdpOps sendServer,T_Room destRoom, unsigned char cmd,unsigned char ackType,const   unsigned char * pData, int len )
 {
 	pthread_t  thread;
 	S_NetDataPackage dataPack;
@@ -251,9 +252,10 @@ int talkTranslateCmdToDestNotWaitAck(T_Room destRoom , unsigned char cmd,unsigne
 	bzero(&dataPack,sizeof(S_NetDataPackage));
 	dataPack.dataBody = UdpBuildMsg(ackType,cmd,localRoom,destRoom,pData,len);
 	dataPack.remoteInfo.sin_port = COMM_UNI_PORT;//
+	dataPack.sendServer = sendServer;
 	if( 0 == getRoomIpAddr(destRoom,&dataPack.remoteInfo.sin_addr.s_addr)){
 
-		return udpSingleServer->write(udpSingleServer,dataPack.dataBody.buf,
+		return sendServer->write(sendServer,dataPack.dataBody.buf,
 			dataPack.dataBody.len,dataPack.remoteInfo.sin_addr.s_addr,
 			dataPack.remoteInfo.sin_port);
 
@@ -267,7 +269,7 @@ fail0:
 	
 }
 
-int talkTranslateCmdToDestWaitAck(T_Room destRoom , unsigned char cmd,const   unsigned char * pData, int len )
+int talkTranslateCmdToDestWaitAck(pUdpOps sendServer,T_Room destRoom , unsigned char cmd,const   unsigned char * pData, int len )
 {
 	pthread_t  thread;
 	S_NetDataPackage dataPack;
@@ -277,6 +279,7 @@ int talkTranslateCmdToDestWaitAck(T_Room destRoom , unsigned char cmd,const   un
 		dataPack.dataBody = UdpBuildMsg(NOT_ACK,cmd,localRoom,destRoom,pData,len);
 		
 		dataPack.remoteInfo.sin_port = COMM_UNI_PORT;//
+		dataPack.sendServer = sendServer;
 		ret = pushDataToQueueHandle(udpDataSendQueueHead,&dataPack,1);
 		CHECK_RET(ret<0, "fail to pushDataToQueueHandle", goto fail0);
 		return 0;
@@ -289,19 +292,22 @@ fail0:
 	return -1;
 
 }
+T_eTALK_STATUS talkGetWorkState(void)
+{
+	return getLocalTalkState(stateMachinePack);
+}
 int talkTranslateAnswerOrHuangUp(T_Room               destRoom)
 {
 	
 	if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  )
 	{	
 		
-		return talkTranslateCmdToDestWaitAck(destRoom,HOOK_CMD,NULL,0 );	
+		return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,HOOK_CMD,NULL,0 );	
 	}else if(getLocalTalkState(stateMachinePack)  == TALKING || 
 		getLocalTalkState(stateMachinePack)  == WAIT_DES_HOOK)
 	{
-		if(destRoom.type == 8) //呼叫管理机时忽略这个键值
-			return 0;
-		return talkTranslateCmdToDestWaitAck(destRoom,UNHOOK_CMD,NULL,0 );		
+		
+		return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,UNHOOK_CMD,NULL,0 );		
 	}
 	return -1;
 }
@@ -310,10 +316,22 @@ int talkTranslateHuangUp(T_Room               destRoom)
 	 if(getLocalTalkState(stateMachinePack)  == TALKING || 
 		getLocalTalkState(stateMachinePack)  == WAIT_DES_HOOK)
 	{
-		return talkTranslateCmdToDestWaitAck(destRoom,UNHOOK_CMD,NULL,0 );		
+		return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,UNHOOK_CMD,NULL,0 );		
 	}else if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK )
 	{
-		return talkTranslateCmdToDestWaitAck(destRoom,RST_CMD,NULL,0 );		
+		//if( destRoom.type  == X6B_ZJ)
+		{
+			
+			if(isMultiExtension() >0){
+				LOGD("send udpMulticastServer RST_CMD");
+				return sendMulitCmd(RST_CMD,destRoom);
+			
+			}else{
+				LOGD("send udpSingleServer RST_CMD");
+				return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,RST_CMD,NULL,0 );	
+			}
+		}
+	//	return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,UNHOOK_CMD,NULL,0 );		
 	}
 	return -1;
 	
@@ -329,14 +347,19 @@ int openLock(T_Room destRoom)
 		{
 			if((destRoom.type == 8 )&& (getLocalTalkState(stateMachinePack)  == TALKING ) )
 				return 0;
-			return talkTranslateCmdToDestWaitAck(destRoom,OPEN_CMD,NULL,0 );
+			return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,OPEN_CMD,NULL,0 );
 			
 		}else if(getLocalTalkState(stateMachinePack)  == WAIT_DES_HOOK){
 			return 0;
 		}
 	return -1;
 }
-
+int userSingleServerSendDataToDestRoom(T_Room destRoom , unsigned char cmd,const   unsigned char * pData, int len)
+{
+	
+	
+	return talkTranslateCmdToDestWaitAck(udpSingleServer,destRoom,cmd,pData,len);	
+}
 int callManager(void)
 {
 	T_Room  managerRoom;
@@ -346,13 +369,13 @@ int callManager(void)
 	
 	if(getLocalTalkState(stateMachinePack)  == TALK_FREE  )
 	{
-		return talkTranslateCmdToDestWaitAck(managerRoom,CALL_CMD,NULL,0 );	
+		return talkTranslateCmdToDestWaitAck(udpSingleServer,managerRoom,CALL_CMD,NULL,0 );	
 	}else
 		return -1;
 fail0:
 	return -1;
 }
-
+/*
 static int	ackDataToRemote(T_Room destRoom , unsigned char cmd,unsigned char ackType, const void *data,int len,struct sockaddr_in remoteInfo)
 {
 	MsgBody dataBody;
@@ -371,6 +394,9 @@ static int ackCmdToRemote(T_Room destRoom ,unsigned char cmd,unsigned char ackTy
 				remoteInfo.sin_port);	
 
 }
+*/
+//0xaa 0xe3 0x2 0x2	0x1 0x2 0x1 0x0	0x0 0x1 0x1 0x1	0x2 0x1 0x2 0x1	0x2 0x88 
+//0xaa 0xe3 0x6 0x2 0x1 0x2 0x1 0x0 0x0 0x1 0x1 0x1 0x2 0x1 0x2 0x1 0x2 0x73
 static MsgBody UdpBuildMsg(unsigned char ackType, unsigned char cmd, T_Room srcRoom,
 		T_Room destRoom, const unsigned char *pData, int dataLen) {
 	MsgBody tmpMsg;
@@ -385,25 +411,35 @@ static MsgBody UdpBuildMsg(unsigned char ackType, unsigned char cmd, T_Room srcR
 	if (pData != NULL && dataLen > 0) {
 		memcpy(&(pHead->dataStart), pData, dataLen);
 	}
-	tmpMsg.buf[len - 1] = NByteCrc8(0, (unsigned char *) pHead, len - 1);
+	
+	tmpMsg.buf[len - 1] = getUtilsOps()->NByteCrc8(0, (unsigned char *) pHead, len - 1);
 	tmpMsg.len = len;
 	return tmpMsg;
 }
 
 
-int talkCommandExit(void)
+void talkCommandExit(void)
 {
+
+	destroyUdpServer(&udpSingleServer);
+	destroyUdpServer(&udpMulticastServer);
+	destroyUdpServer(&udpBoardServer);
+	queueHandleExit(&udpDataSendQueueHead);
+	pthread_destroy(&sendUdpDataThread);	
+	destroyTimerTaskServer(&delaySendBusyTimerId);
+	destroyTimerTaskServer(&sendHeartbeatTimerId);
+	
 	return 0;
 }
 static int udpBoardCastRecvCallBack(unsigned char*data  ,unsigned int len)
 {
 	MsgBody recvDataBuf;
-	LOGD("udpSingleRecvCallBack\n");
+	LOGD("udpBoard:");
+	getUtilsOps()->printData(data,len);
 	bzero(&recvDataBuf,sizeof(MsgBody));
 	if(data == NULL)
 		return ;
-	//PRINT_ARRAY(data->dataBody.buf, data->dataBody.len);
-	getUtilsOps()->printData(data,len);
+	
 	pT_Comm_Head pRecv = (pT_Comm_Head)(data);
 	//data->remoteInfo.sin_port  = htons(COMM_UNI_PORT);
 	
@@ -415,13 +451,13 @@ static int udpBoardCastRecvCallBack(unsigned char*data  ,unsigned int len)
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpBoardServer);
 		}else {
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpBoardServer);
 		}
 	}else{
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,NULL,0,udpBoardServer);
 		}else{
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpBoardServer);
 		}
 	}
 		
@@ -430,14 +466,19 @@ static int udpBoardCastRecvCallBack(unsigned char*data  ,unsigned int len)
 static  int udpMulitRecvCallBack(unsigned char* data,unsigned int len)
 {	
 	MsgBody recvDataBuf;
-	LOGD("udpSingleRecvCallBack\n");
+	struct sockaddr_in sourceIp;
+	LOGD("udpMulit:");
+	getUtilsOps()->printData(data,len);
 	bzero(&recvDataBuf,sizeof(MsgBody));
 	if(data == NULL)
-		return ;
+		return -1;
 	//PRINT_ARRAY(data->dataBody.buf, data->dataBody.len);
-	getUtilsOps()->printData(data,len);
 	pT_Comm_Head pRecv = (pT_Comm_Head)(data);
 	//data->remoteInfo.sin_port  = htons(COMM_UNI_PORT);
+
+	udpMulticastServer->getRemoteInfo(udpMulticastServer,&sourceIp);
+	sourceIp.sin_port = htons(COMM_UNI_PORT);
+	udpMulticastServer->setRemoteInfo(udpMulticastServer,sourceIp);
 	
 	if(len > sizeof(T_Comm_Head))
 	{
@@ -447,13 +488,13 @@ static  int udpMulitRecvCallBack(unsigned char* data,unsigned int len)
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpMulticastServer);
 		}else {
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpMulticastServer);
 		}
 	}else{
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,NULL,0,udpMulticastServer);
 		}else{
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpMulticastServer);
 		}
 	}
 		
@@ -463,15 +504,21 @@ static  int udpMulitRecvCallBack(unsigned char* data,unsigned int len)
 static int  udpSingleRecvCallBack (unsigned char* data ,unsigned int len)
 {
 	MsgBody recvDataBuf;
-	LOGD("udpSingleRecvCallBack\n");
+	struct sockaddr_in sourceIp;
 	bzero(&recvDataBuf,sizeof(MsgBody));
 	if(data == NULL)
 		return ;
 	//PRINT_ARRAY(data->dataBody.buf, data->dataBody.len);
+	LOGD("udpSingle:");
 	getUtilsOps()->printData(data,len);
 	pT_Comm_Head pRecv = (pT_Comm_Head)(data);
 	//data->remoteInfo.sin_port  = htons(COMM_UNI_PORT);
 	
+	
+	udpSingleServer->getRemoteInfo(udpSingleServer,&sourceIp);
+	sourceIp.sin_port = htons(COMM_UNI_PORT);
+	udpSingleServer->setRemoteInfo(udpSingleServer,sourceIp);
+
 	if(len > sizeof(T_Comm_Head))
 	{
 		recvDataBuf.len = len -sizeof(T_Comm_Head) +1;
@@ -480,20 +527,20 @@ static int  udpSingleRecvCallBack (unsigned char* data ,unsigned int len)
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpSingleServer);
 		}else {
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpSingleServer);
 		}
 	}else{
 		if(pRecv->ackType == NOT_ACK){
 			notAckcmdParseAndHandle(pRecv,NULL,0,udpSingleServer);
 		}else{
-			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len);
+			ackcmdParseAndHandle(pRecv,recvDataBuf.buf,recvDataBuf.len,udpSingleServer);
 		}
 	}
 		
 	return len;
 
 }
-static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len)
+static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len, pUdpOps udpserver)
 {
 	//发送线程若收不到此应答，则会认为对方没收到数据，则再次发送.
 	wakeAckWait(ackWakeCmdPack,pRecv->cmd);
@@ -527,6 +574,7 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 		case 	RST_CMD:
 			LOGI("RST_CMD!!");
 			{
+				
 				T_Room destRoom;
 				if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
 				{
@@ -540,24 +588,34 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 			    
 				if(isMultiExtension() == 1){
 					if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
-						sendMulitCmd(OTHER_DEV_PROC);
+						sendMulitCmd(OTHER_DEV_PROC,destRoom);
 					}
 				}
-				
-				upCmdtoUiFunction(pRecv->sorAddr,UI_PEER_HUNG_UP,recvData,len);
+			
+				//upCmdtoUiFunction(pRecv->sorAddr,UI_PEER_HUNG_UP,recvData,len);
 				setTalkState(stateMachinePack,TALK_FREE);
 			}
 		break;
 		case	OPEN_CMD:
 			switch(pRecv->ackType){
-				case ACK_OK:
-					upCmdtoUiFunction(pRecv->sorAddr,UI_OPEN_LOCK_SUCESS,recvData,len);
-					if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
-						
-						setTalkState(stateMachinePack, TALK_FREE);
-						if(isMultiExtension() == 1)
+				case ACK_OK:{
+						T_Room destRoom;
+						if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
 						{
-							sendMulitCmd(OTHER_DEV_PROC);
+							if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) != 0   )
+							{
+								break;
+							}
+						}
+						
+						upCmdtoUiFunction(pRecv->sorAddr,UI_OPEN_LOCK_SUCESS,recvData,len);
+						if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
+							
+							setTalkState(stateMachinePack, TALK_FREE);
+							if(isMultiExtension() == 1)
+							{
+								sendMulitCmd(OTHER_DEV_PROC,destRoom);
+							}
 						}
 					}
 					break;
@@ -589,15 +647,24 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 		case 	HOOK_CMD:
 			switch(pRecv->ackType)
 			{
-				case ACK_OK:
-					if(isMultiExtension() == 1){
-						if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
-							sendMulitCmd(OTHER_DEV_PROC);
+				case ACK_OK:{
+						T_Room destRoom;
+						if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
+						{
+							if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) != 0   )
+							{
+								break;
+							}
 						}
+						if(isMultiExtension() == 1){
+							if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
+								sendMulitCmd(OTHER_DEV_PROC,destRoom);
+							}
+						}
+						setTalkState(stateMachinePack, TALKING);
+						setTalkDestRoom(stateMachinePack,pRecv->sorAddr);
+						upCmdtoUiFunction(pRecv->sorAddr,UI_PEER_ANSWERED,recvData,len);
 					}
-					setTalkState(stateMachinePack, TALKING);
-					setTalkDestRoom(stateMachinePack,pRecv->sorAddr);
-					upCmdtoUiFunction(pRecv->sorAddr,UI_PEER_ANSWERED,recvData,len);
 					break;
 				case LINE_BUSY:
 					setTalkState(stateMachinePack, TALK_FREE);
@@ -606,7 +673,7 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 			}
 			break;
 		case 	UNHOOK_CMD:
-			LOGI("UNHOOK_CMD");
+			LOGI("UNHOOK_CMD!!!!!!");
 			{
 				T_Room destRoom;
 				if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
@@ -616,12 +683,9 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 						break;
 					}
 				}
-			
-
-			
 				if(isMultiExtension() == 1){
 					if(getLocalTalkState(stateMachinePack)  == WAIT_LOCAL_HOOK  ){
-						sendMulitCmd(OTHER_DEV_PROC);
+						sendMulitCmd(OTHER_DEV_PROC,destRoom);
 					}
 				}
 				upCmdtoUiFunction(pRecv->sorAddr,UI_HUNG_UP_SUCCESS,recvData,len);
@@ -675,8 +739,20 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 		case 	DEL_SM_CMD:
 			break;
 		case 	UPDATE_NETCONFIG:
-			LOGD("UPDATE_NETCONFIG");
-			upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData,len);
+		{
+				int * updateDataLen =  (int *)recvData;
+				
+				len  = len - sizeof(int) - 1;//长度+校验位
+				if( *updateDataLen == len)
+				{
+					LOGD("准备升级！ 长度:%d",*updateDataLen);
+					 //偏移一个长度位
+					upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData + sizeof(int),*updateDataLen);
+				}else{
+
+					LOGE("数据长度不对！");
+				}
+		}
 			break;
 		case 	TFTP_UPDATE_APP :
 			LOGD("TFTP_UPDATE_APP");
@@ -686,7 +762,14 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 			
 				if( tftpUpdate->serverip == 0)
 				{
-					tftpUpdate->serverip = remoteInfo.sin_addr.s_addr;
+					if(udpserver != NULL )
+					{
+						struct sockaddr_in remoteInfo;
+						if(0 == udpserver->getRemoteInfo(udpserver,&remoteInfo)){
+							tftpUpdate->serverip = remoteInfo.sin_addr.s_addr;
+						}
+					}
+					
 				}
 				upCmdtoUiFunction(pRecv->sorAddr,UI_TFTP_UPDATE_APP,recvData,len);
 			}
@@ -719,26 +802,30 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 static void delaysendAckBusy(void *arg)
 {
 	
-	
 	LOGD("ack busy!");
 
 	struct{
-		T_Comm_Head cmd;
-		UdpOps server;
-	}*timerArg;
-	timerArg = arg;
+			T_Comm_Head cmd;
+			struct sockaddr_in remoteinfo;
+	}timerArg;
+	
+	memcpy(&timerArg,arg,sizeof(timerArg));
 	MsgBody dataBody;
-	dataBody = UdpBuildMsg(LINE_BUSY,timerArg->cmd->cmd,localRoom,timerArg->cmd->sorAddr,NULL,0);
-	//由于对方IP或者地址会发生变化,这里可能会出现BUG
-	timerArg->server->ack(udpSingleServer,dataBody->buf,dataBody->len);
-	
-	
+	dataBody = UdpBuildMsg(LINE_BUSY,timerArg.cmd.cmd,localRoom,timerArg.cmd.sorAddr,NULL,0);
+	udpSingleServer->write(udpSingleServer,dataBody.buf,dataBody.len,
+		timerArg.remoteinfo.sin_addr.s_addr ,ntohs(timerArg.remoteinfo.sin_port));
+	LOGD("ack end!");
+		
 }
+
 static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len,pUdpOps udpServer)
 {
-	LOGD("recv notack cmd !\n");
+	
 	struct timeval tv; 
 	p_time_weather_t timrData;
+	MsgBody dataBody;
+	bzero(&dataBody,sizeof(MsgBody));
+	LOGD("recv notack cmd !\n");
 	switch (pRecv->cmd) {	
 		case 	SET_TIME :{
 			timrData = (p_time_weather_t)recvData;	
@@ -753,7 +840,7 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			MsgBody dataBody;
 			dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,(const void *)&heartbeatPack,sizeof(heartbeatPack));
 			udpServer->ack(udpServer,dataBody.buf,dataBody.len);
-	
+			
 		}
 			break;
 
@@ -770,7 +857,14 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			
 				if( tftpUpdate->serverip == 0)
 				{
-					tftpUpdate->serverip = remoteInfo.sin_addr.s_addr;
+					if(udpServer != NULL )
+					{
+						struct sockaddr_in remoteInfo;
+						if(0 == udpServer->getRemoteInfo(udpServer,&remoteInfo)){
+							tftpUpdate->serverip = remoteInfo.sin_addr.s_addr;
+						}
+					}
+					
 				}
 				upCmdtoUiFunction(pRecv->sorAddr,UI_TFTP_UPDATE_APP,recvData,len);
 			}
@@ -781,7 +875,7 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			break;
 		case 	CALL_CMD:
 			LOGI("收到呼叫命令\n");
-			MsgBody dataBody;
+			
 			if((getLocalTalkState(stateMachinePack) == TALK_FREE ) &&(security_getAlarmState() != E_ALARM_RUNING) ){
 
 				//ackCmdToRemote(pRecv->sorAddr,pRecv->cmd,ACK_OK,remoteInfo);
@@ -789,7 +883,7 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 				
 				dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
 				udpServer->ack(udpServer,dataBody.buf,dataBody.len);
-
+		
 				
 				upCmdtoUiFunction(pRecv->sorAddr,UI_BE_CALLED_RING,recvData,len);
 				setTalkState(stateMachinePack,WAIT_LOCAL_HOOK);
@@ -798,22 +892,24 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			{	
 				struct{
 					T_Comm_Head cmd;
-					UdpOps server;
+					struct sockaddr_in remoteinfo;
 				}timerArg;
 				LOGD("本机忙!\n");
 				if(isMultiExtension() == 1){
 	
 					timerArg.cmd = *pRecv;
-					timerArg.server = *udpServer;
-			
-					if(delaySendBusyTimerId )
-					{
-						destroyTimerTaskServer(&delaySendBusyTimerId);
-					}
-					delaySendBusyTimerId = createTimerTaskServer(1000,0,1,delaysendAckBusy
-								   ,&timerArg,sizeof(timerArg));
+					 if(0 == udpServer->getRemoteInfo(udpServer,&timerArg.remoteinfo))
+					 {
+					 	if(delaySendBusyTimerId )
+						{
+							destroyTimerTaskServer(&delaySendBusyTimerId);
+						}
+						delaySendBusyTimerId = createTimerTaskServer(1000,0,1,delaysendAckBusy
+									   ,&timerArg,sizeof(timerArg));
+						delaySendBusyTimerId->start(delaySendBusyTimerId);
+					 	
+					 }
 
-								   
 								   
 				}else
 				{
@@ -828,6 +924,8 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 				LOGI("RST_CMD!!");
 				T_Room destRoom;
 				MsgBody dataBody;
+				if(security_getAlarmState() == E_ALARM_RUNING)
+					break;
 				if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
 				{
 					if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) != 0   )
@@ -863,27 +961,36 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 		case	WATCH_CMD:
 			break;
 		case 	HOOK_CMD:
-			LOGD("HOOK_CMD !");
+			LOGD(" NOTACK HOOK_CMD !");
+			dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
+			udpServer->ack(udpServer,dataBody.buf,dataBody.len);
 			if(getLocalTalkState(stateMachinePack) == WAIT_DES_HOOK)
 			{
-				dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
-				udpServer->ack(udpServer,dataBody.buf,dataBody.len);
-				
 				
 				setTalkState(stateMachinePack, TALKING);
 				setTalkDestRoom(stateMachinePack,pRecv->sorAddr);
+				
 				upCmdtoUiFunction(pRecv->sorAddr,UI_PEER_ANSWERED,recvData,len);
-				
-			}else{
-				
-				dataBody = UdpBuildMsg(ACK_ERR,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
-				udpServer->ack(udpServer,dataBody.buf,dataBody.len);
-				
-				
+
+
 			}
+
+
+			
 			break;
 		case 	UNHOOK_CMD:
 			LOGD("UNHOOK_CMD !");
+			
+			//if(memcpy(&localRoom,&(pRecv->sorAddr),sizeof(localRoom)) != 0)   break;
+			T_Room destRoom;
+			if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
+			{
+				if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) != 0   )
+				{
+					break;
+				}
+			}
+
 			if(getLocalTalkState(stateMachinePack) == TALKING)
 			{
 				dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
@@ -925,10 +1032,24 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			setTalkState(stateMachinePack,TALK_FREE);
 			break;
 		case    OTHER_DEV_PROC:
-			LOGI("OTHER_DEV_PROC");
-			if(getLocalTalkState(stateMachinePack) == WAIT_LOCAL_HOOK  ){
-				upCmdtoUiFunction(pRecv->sorAddr,UI_OTHER_DEV_PROC,recvData,len);
-				setTalkState(stateMachinePack,TALK_FREE);
+			{
+				T_Room destRoom;
+				LOGI("OTHER_DEV_PROC！3");
+				
+				if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
+				{
+					if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) == 0  )
+					{
+						break;
+					}
+				}
+				//走到这里说明不是自己发出去的组播
+				
+				if(getLocalTalkState(stateMachinePack) == WAIT_LOCAL_HOOK){
+					
+					upCmdtoUiFunction(pRecv->sorAddr,UI_OTHER_DEV_PROC,recvData,len);
+					setTalkState(stateMachinePack,TALK_FREE);
+				}
 			}
 			break;
 		case 	READ_BLOCK_ROOM:
@@ -956,7 +1077,20 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 		case 	DEL_SM_CMD:
 			break;
 		case 	UPDATE_NETCONFIG:
-			upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData,len);
+			{
+				int * updateDataLen =  (int *)recvData;
+				
+				len  = len - sizeof(int) - 1;//长度+校验位
+				if( *updateDataLen == len)
+				{
+					LOGD("准备升级！ 长度:%d",*updateDataLen);
+					 //偏移一个长度位
+					upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData + sizeof(int),*updateDataLen);
+				}else{
+
+					LOGE("数据长度不对！");
+				}
+			}
 		
 			break;
 		case 	READ_ROUTING_TAB:
@@ -976,6 +1110,16 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 		case 	SET_DEV_INFO:
 			break;
 		case 	GET_OUTDOORBELL_NUM:
+			break;
+		case REBOOT_CMD:{
+				if(memcmp(&localRoom,&(pRecv->destAddr),sizeof(T_Room)) != 0   )
+				{
+					break;
+				}
+				dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);
+				udpServer->ack(udpServer,dataBody.buf,dataBody.len);
+				system("reboot");
+			}
 			break;
 		default:
 			break;
@@ -1011,11 +1155,13 @@ static void * udpSendThread(void *arg)
 	unsigned sendCmd;
 	T_Room destRoom;
 	T_eTALK_STATUS temp_state = 0;
+	int pullret = 0;
+	pUdpOps SendUpdServer;
 	while(sendUdpDataThread->check(sendUdpDataThread ) == Thread_Run)
 	{
 		bzero(&sendPack,sizeof(S_NetDataPackage));
-		
-		if(0 == pullDataFromQueueHandle(udpDataSendQueueHead,&sendPack,sizeof(S_NetDataPackage)))
+		pullret = pullDataFromQueueHandle(udpDataSendQueueHead,&sendPack,sizeof(S_NetDataPackage));
+		if(0 == pullret)
 		{
 			
 			timeout = 0;
@@ -1027,11 +1173,13 @@ sendAgain:
 			{
 				setTalkState(stateMachinePack,temp_state);
 			}
-
-			udpSingleServer->write(udpSingleServer,sendPack.dataBody.buf,
+			SendUpdServer = (pUdpOps)sendPack.sendServer;
+			//getUtilsOps()->printData(sendPack.dataBody.buf,sendPack.dataBody.len);
+			SendUpdServer->write(SendUpdServer,sendPack.dataBody.buf,
 			sendPack.dataBody.len,sendPack.remoteInfo.sin_addr.s_addr,
 			sendPack.remoteInfo.sin_port);
-	
+
+			
 			if(waitRemoteAck(ackWakeCmdPack,(sendCmd)) == -1 ){
 				
 				if(timeout ++ < 1)
@@ -1055,8 +1203,12 @@ sendAgain:
 			}
 			//发送成功		
 		}
-		
+		else if(IS_EXIT == pullret )
+		{
+			goto exit0;
+		}
 	}
+exit0:
 	return NULL;
 }
 
@@ -1116,20 +1268,24 @@ static void setTalkState(pStateMachinePack pack,T_eTALK_STATUS	tackState)
 		case WAIT_LOCAL_HOOK:
 			
 			pack->timerId  = createTimerTaskServer(60*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
-			    break;
+			pack->timerId->start(pack->timerId );
+			break;
 
 		case WAIT_DES_HOOK:	
 			pack->timerId  = createTimerTaskServer(60*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
-			    break;
+				pack->timerId->start(pack->timerId );
+			break;
 		case TALKING:
-			pack->timerId  = createTimerTaskServer(120*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
-			    break;
+			pack->timerId  = createTimerTaskServer(121*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
+			pack->timerId->start(pack->timerId );
+			break;
 		case WATCH_WAIT_ACK:
 		
 				break;
 		case WATCHING:
 			pack->timerId  = createTimerTaskServer(60*1000,0,1,pack->timeoutCallBackFunc,pack,sizeof(StateMachinePack));
-			    break;
+			pack->timerId->start(pack->timerId );
+			break;
 		default:
 				break;	
 		
@@ -1144,7 +1300,7 @@ static T_eTALK_STATUS getLocalTalkState(pStateMachinePack pack)
 }
 static int stateMachinePackDestroy(pStateMachinePack * pack)
 {
-	timer_taskExit();
+	
 	if(pack != NULL &&*pack != NULL){
 		free(*pack);
 		*pack = NULL;
@@ -1156,7 +1312,7 @@ static int stateMachinePackDestroy(pStateMachinePack * pack)
 static void stateMachineCallBack(void *arg)
 {
 		pStateMachinePack dataPack = (pStateMachinePack)arg;
-	LOGD("dataPack->tackState = 0x%x",dataPack->tackState);
+		LOGD("dataPack->tackState = 0x%x",dataPack->tackState);
 	
 	switch(dataPack->tackState)
 	{
@@ -1215,7 +1371,7 @@ static pAckWakePack waitAckPackInit(int timeoutMs )
 
 	memset(&eventItem, 0, sizeof(struct epoll_event));
 	eventItem.data.fd = pPack->mWakeReadPipeFd;  
- 	eventItem.events = EPOLLIN | EPOLLET;
+ 	eventItem.events = EPOLLIN ;//表示句柄可读就唤醒
 	result = epoll_ctl(pPack->readPipeEpollFd, EPOLL_CTL_ADD,pPack->mWakeReadPipeFd, &eventItem);
 	CHECK_RET(result<0, "epoll_ctl", goto fail0);
 
@@ -1237,7 +1393,7 @@ static int waitRemoteAck(pAckWakePack waitPack,char cmd)
 	
     do {
         nRead = read(waitPack->mWakeReadPipeFd, buf, sizeof(buf));
-    } while ((nRead == -1 && errno == EINTR) || nRead == sizeof(buf));
+    } while (nRead == sizeof(buf));
 	if(buf[0] == cmd  )
 		return  0;
 	else
@@ -1270,20 +1426,15 @@ static int  wakeAckWait(pAckWakePack waitPack,char cmd)
 }
 
 
-
-
 /*组播服务*/
 
 
 
-static int sendMulitCmd(unsigned cmd)
+static int sendMulitCmd(unsigned cmd ,T_Room destRoom)
 {
 	MsgBody  msg;
-
-	
-	msg =  UdpBuildMsg(NOT_ACK,cmd, localRoom,localRoom,NULL,0);
+	msg =  UdpBuildMsg(NOT_ACK,cmd, localRoom,destRoom,NULL,0);
 	return udpMulticastServer->write(udpMulticastServer,msg.buf,msg.len,localNetInfo.multiaddr,COMM_MULIT_PORT);
-				
 }
 
 

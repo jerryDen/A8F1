@@ -7,7 +7,6 @@
 int RingVol = 80;
 void palyWavInit(void)
 {
-	 wavInit();
 	 RingVol = getConfigVol(RINGVOL);
 	 LOGD("RINGVOL:%d\n",RingVol);
 }

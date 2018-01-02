@@ -1,27 +1,33 @@
-include ../Makefile.param
-
 HIARCH?=hi3518
 LIBC?=uclibc
 HIDBG?=HI_DEBUG
 COUURENT_PATH = $(shell pwd)
-INCLUDE_DIR := $(COUURENT_PATH)/include
+PRIVATE_INCLUDE_DIR := $(COUURENT_PATH)/include
+HI_INCLUDE_DIR := $(COUURENT_PATH)/hi_include
 OUTPUT_DIR = $(shell pwd)/output
+HI_LIB := $(COUURENT_PATH)/hi_lib
 
-CFLAGS += -I $(INCLUDE_DIR) 
-CFLAGS += -I $(REL_LIB)/include
-CFLAGS += -I $(PROJECT_DIR)/include
-CFLAGS += -I $(COMMON_DIR)
-LDFLAGS := -L $(REL_LIB)
+CHIP_ID ?= CHIP_HI3518E_V200
+SENSOR_TYPE ?= SONY_IMX222_DC_1080P_30FPS
 
+
+CFLAGS += -I $(PRIVATE_INCLUDE_DIR) 
+CFLAGS += -I $(HI_INCLUDE_DIR)
+CFLAGS += -DCHIP_ID=$(CHIP_ID) -DSENSOR_TYPE=$(SENSOR_TYPE)
+CFLAGS += -DMEMWATCH -DMW_STDIO 
+LDFLAGS := -L $(COMMON_DIR)/hi_lib
 #CFILE_DIR := $(COUURENT_PATH)/common
+CC = arm-hisiv300-linux-gcc
+CXX = arm-hisiv300-linux-g++
+
 LD_SHARE = -L ./lib
 LD =  $(CC)ld
-TAG := $(COUURENT_PATH)/test_demo
+TAG := $(COUURENT_PATH)/room_app
 LIBS = -lpthread -lrt -lm
+
 export CFLAGS
 export OUTPUT_DIR
 export CC
-export COMMON_DIR
 #将CFILE_DIR目录下的所有点c文件名(包括路径)放到SRC中
 #SRC  :=  $(wildcard $(CFILE_DIR)/*.c)
 
@@ -40,7 +46,8 @@ export LD_LIBRARY_PATH = ./lib
 
 
 
-SUB_DIRS :=   $(COUURENT_PATH)/common		\
+SUB_DIRS :=   $(COUURENT_PATH)/hi_common \
+	      $(COUURENT_PATH)/common		\
 	      $(COUURENT_PATH)/sysConfig	\
 	      $(COUURENT_PATH)/localNetInfo	\
 	      $(COUURENT_PATH)/talkCommandTranslate \
@@ -50,7 +57,8 @@ SUB_DIRS :=   $(COUURENT_PATH)/common		\
 	      $(COUURENT_PATH)/keyBoard \
 	      $(COUURENT_PATH)/tftpUpdateServer \
 	      $(COUURENT_PATH)/watchdog  \
-	      $(COUURENT_PATH)/security
+	      $(COUURENT_PATH)/security \
+	      $(COUURENT_PATH)/memwatch
 		 
 		   
 #
@@ -66,19 +74,19 @@ define clean_subdir
  done;
 endef
 #
-MPI_LIBS += $(REL_LIB)/libive.so
-MPI_LIBS += $(REL_LIB)/libisp.so
-MPI_LIBS += $(REL_LIB)/lib_hiawb.so
-MPI_LIBS += $(REL_LIB)/libsns_imx222.so
-MPI_LIBS += $(REL_LIB)/lib_hidefog.so
-MPI_LIBS += $(REL_LIB)/lib_hiaf.so
-MPI_LIBS += $(REL_LIB)/lib_hiae.so
+MPI_LIBS += $(HI_LIB)/libive.so
+MPI_LIBS += $(HI_LIB)/libisp.so
+MPI_LIBS += $(HI_LIB)/lib_hiawb.so
+MPI_LIBS += $(HI_LIB)/libsns_imx222.so
+MPI_LIBS += $(HI_LIB)/lib_hidefog.so
+MPI_LIBS += $(HI_LIB)/lib_hiaf.so
+MPI_LIBS += $(HI_LIB)/lib_hiae.so
 VQE_LIBS += $(COUURENT_PATH)/lib/libUsCam.so
 VQE_LIBS += $(COUURENT_PATH)/lib/libVqe.so
-VQE_LIBS += $(REL_LIB)/libmpi.so 
+VQE_LIBS += $(HI_LIB)/libmpi.so 
 GEN_O = $(OUTPUT_DIR)/*.o
-$(TAG):  subobjs $(OBJS_FILE) $(COMM_OBJ)
-	$(CC) $(CFLAGS)   -o  $@ $(LDFLAGS) $(OBJS_FILE)  $(GEN_O)  $(COMM_OBJ)  $(LIBS)  $(AUDIO_LIBA)  $(MPI_LIBS)   $(VQE_LIBS) $(LD_SHARE)
+$(TAG):  subobjs $(OBJS_FILE) 
+	$(CC) $(CFLAGS)   -o  $@ $(LDFLAGS) $(OBJS_FILE)  $(GEN_O)    $(LIBS)  $(AUDIO_LIBA)  $(MPI_LIBS)   $(VQE_LIBS) $(LD_SHARE)
 	cp $(TAG)  /rootnfs/
 subobjs:
 	echo "subobjs"
@@ -88,7 +96,7 @@ $(OUTPUT_DIR)/%.o : %.c
 	$(CC) $(CFLAGS) -c  $< -o  $@
 	
 clean:
-	rm -rf *.o $(TAG) $(GEN_O) $(COMM_OBJ)
+	rm -rf *.o $(TAG) $(GEN_O)
 
 
 

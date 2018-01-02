@@ -101,7 +101,12 @@ int getRoomIpAddr( T_Room destRoom, unsigned int *ipAddr)
 	}
 	return -1;	
 }
-
+void cellInfoExit(void)
+{
+	if(g_cellInfo == NULL )
+		return ;
+	free(g_cellInfo);
+}
 
 
 

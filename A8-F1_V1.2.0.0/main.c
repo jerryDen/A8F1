@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <string.h>
+#include <signal.h>
 #include "systemConfig.h"
 #include "localNetInfo.h"
 #include "inputEvent.h"
@@ -13,7 +15,21 @@
 #include "watchdog.h"
 #include "security.h"
 
-T_Room localRoom;
+#include "memwatch.h"
+
+#ifndef SIGSEGV
+#error "SIGNAL.H does not define SIGSEGV; running this program WILL cause a core dump/crash!"
+#endif
+
+#ifndef MEMWATCH
+#error "You really, really don't want to run this without memwatch. Trust me."
+#endif
+
+#if !defined(MW_STDIO) && !defined(MEMWATCH_STDIO)
+#error "Define MW_STDIO and try again, please."
+#endif
+
+static T_Room localRoom;
 static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,
 	const    unsigned char * pData, int  dataLen);
 static void mySleep(int time);
@@ -21,21 +37,51 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState);
 static int securityCallBackFuncTion( int securityEvent,
 	const	void * data , int dataLen );
 
+static main_exit(void);
 
 
 T_Room destRoom;
 
+
+
+static void sigroutine(int dunno) { /* 信号处理例程，其中dunno将会得到信号的值 */ 
+		switch (dunno) { 
+		case 1: 
+			LOGE("Get a signal -- SIGHUP "); 
+			main_exit();
+			break; 
+		case 2: 
+			LOGE("Get a signal -- SIGINT "); 
+			main_exit();
+			break; 
+		case 3: 
+			LOGE("Get a signal -- SIGQUIT "); 
+			main_exit();
+		case SIGPIPE:
+			LOGE("SIGPIPE!");
+			break; 
+		} 
+		return; 
+} 
+static main_exit(void)
+{
+	cellInfoExit();
+	talkAudioExit();
+	stopPlayWav();
+	talkCommandExit();
+	closeWTD();
+	LOGE("main_exit");
+	exit(-1);
+}
 int main(void)
 {
 //初始化一系列模块服务
 	int ret;
 	if(getSystemConfig() == 0)
 		localRoom = getConfigRoomAddr();
-	
 	ret  = cellInfoInit(localRoom);
 	PRINT_ARRAY((char *)&localRoom, sizeof(localRoom));
 	setLocalNetInfo(localRoom);
-	timer_taskInit();
 	
 	security_init(securityCallBackFuncTion);
 	talkAudioInit();
@@ -47,7 +93,10 @@ int main(void)
 	keypadInit(inputEventCallBack);
 	palyStartingUp();
 	openWTD();
-	
+	signal(SIGHUP, sigroutine); 	//* 下面设置三个信号的处理方法 
+	signal(SIGINT, sigroutine); 
+	signal(SIGQUIT, sigroutine); 
+	signal(SIGPIPE, sigroutine); 
 	for(;;)
 	{
 	//以下代码只做测试使用,量产后会去除
@@ -71,16 +120,14 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 {
 	LOGD("keyCode:%d keyValue:%d keyState:%d \n",keyCode,keyValue,keyState);
 	
-
-
 	switch(keyCode)
 	{
 		case OPEN_LOCK:
 			
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{	
 				if(keyState == E_SHORT_PRESS ){
 					security_stopAlarm();
@@ -92,33 +139,35 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 					}
 				}else if(keyState == E_LONG_PRESS)  //长按开锁键,撤防
 				{
-					playRepealAlarm();
-					security_repealAlarm();
+					if(talkGetWorkState() <= TALK_FREE)
+						security_repealAlarm();
 				}
 			}
 			
 			break;
 		case CALL_MANAGER:
 			
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
-
+				
 				if(keyState == E_LONG_PRESS ){
+					security_stopAlarm();
 					callManager();
 				}
 			}
 			break;
 				
 		case HUANG_UP:
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				if(keyState == E_SHORT_PRESS ){
+					security_stopAlarm();
 					if(talkTranslateAnswerOrHuangUp(destRoom) <0)
 					{
 						palyKeyTone();
@@ -126,17 +175,17 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 					
 				}else if(keyState == E_LONG_PRESS)
 				{
-					playLayoutAlarm();	
-					security_layoutAlarm();
+					if(talkGetWorkState() <= TALK_FREE)
+						security_layoutAlarm();
 				}
 				
 			}
 			break;
 		case MQ_ALARM:
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				LOGD("MQ_ALARM");
 				
@@ -146,9 +195,9 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			break;
 		case HW_ALARM:
 			
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				LOGD("HW_ALARM");
 				
@@ -156,30 +205,30 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			}
 			break;
 		case JJ_ALARM:
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				LOGD("JJ_ALARM");
 				security_promptlySendAlarm(E_JJ_ALARM);
 			}
 			break;
 		case MC_ALARM:
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				LOGD("MC_ALARM");
 				security_promptlySendAlarm(E_MC_ALARM);
 			}
 			break;
 		case YW_ALARM:
-			if(keyValue == KEY_DOWN)
+			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_UP)
+			}else if(keyValue == KEY_STATE_UP)
 			{
 				LOGD("YW_ALARM");
 				security_promptlySendAlarm(E_YW_ALARM);
@@ -198,11 +247,19 @@ static int securityCallBackFuncTion( int securityEvent,const	void * data , int d
 
 	switch(securityEvent)
 	{
+		case UI_ALARM_LAYOUT:
+			playLayoutAlarm();
+			break;
+		case UI_ALARM_REPEAL:
+			playRepealAlarm();	
+			break;
 		case UI_ALARM_STOP:
+			
 			stopPlayWav();
 			break;
 		case UI_ALARM_DELAY_TRIGGER:
 			LOGI("UI_ALARM_DELAY_TRIGGER");
+			talkTranslateHuangUp(destRoom);
 			palyDelayAlarm();
 			break;
 		case UI_ALARM_TRIGGER:
@@ -225,6 +282,7 @@ static int securityCallBackFuncTion( int securityEvent,const	void * data , int d
 					palyAlarm();
 					break;
 				case E_JJ_ALARM:
+					talkTranslateHuangUp(destRoom);
 					palyDetectAlarm();
 					break;
 			}
@@ -235,7 +293,7 @@ static int securityCallBackFuncTion( int securityEvent,const	void * data , int d
 			T_Room managerRoom;
 			ret  = getManagerRoom(&managerRoom);
 			CHECK_RET(ret<0, "fail to getManagerRoom", goto fail0 );
-			ret = talkTranslateCmdToDestWaitAck(managerRoom,WARN_CMD,(const   unsigned char *)&data,sizeof(event_record_t));
+			ret  =  userSingleServerSendDataToDestRoom(managerRoom,WARN_CMD,(const   unsigned char *)data,sizeof(event_record_t));
 			CHECK_RET(ret<0, "fail to talkTranslateCmdToDestWaitAck", goto fail0 );
 		}
 		break;
@@ -274,13 +332,15 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 			
 			break;
 		case UI_PEER_HUNG_UP:
-			palyPeerHangUp();
+			
 			talkAudioStop();
+			palyPeerHangUp();
 			LOGI("UI_PEER_HUNG_UP!\n");
 			break;
 		case UI_PEER_OFF_LINE:
-			palyLineFault();
 			talkAudioStop();
+			palyLineFault();
+			
 			LOGI("UI_PEER_OFF_LINE!\n");
 			break;
 		case UI_PEER_NO_ANSWER:
@@ -292,8 +352,13 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 			LOGI("UI_PEER_LINE_BUSY!\n");
 			break;
 		case UI_TALK_TIME_OUT:
+			LOGI("UI_TALK_TIME_OUT0!\n");
+			talkAudioStop();
+			usleep(1000*100);
 			palyTalkTimeout();
-			LOGI("UI_TALK_TIME_OUT!\n");
+			LOGI("UI_TALK_TIME_OUT1!\n");
+			
+			LOGI("UI_TALK_TIME_OUT2!\n");
 			break;
 		case UI_WATCH_SUCCESS:
 			LOGI("UI_WATCH_SUCCESS!\n");
@@ -308,14 +373,19 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 			break;
 		case UI_HUNG_UP_SUCCESS	:
 			LOGI("UI_HUNG_UP_SUCCESS!\n");
-			stopPlayWav();
 			talkAudioStop();
+			if(security_getAlarmState() != E_ALARM_RUNING )
+			{
+				stopPlayWav();
+			}
+			
 			break;
 		case UI_ANSWER_SUCESS:
 			LOGI("UI_ANSWER_SUCESS!\n");
 			break;
 		case UI_OPEN_LOCK_SUCESS:
-			stopPlayWav();
+			if(security_getAlarmState != E_ALARM_RUNING)
+				stopPlayWav();
 			LOGI("UI_OPEN_LOCK_SUCESS!\n");
 			break;
 		case UI_UPDATE_TIME_WEATHRE:
@@ -342,7 +412,7 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 		case UI_UPDATE_SYSCONFIG:
 			LOGI("UI_UPDATE_SYSCONFIG!\n");
 			stSYS_CONFIG sysconfig_data;
-			bzero(&sysconfig_data,sizeof(stSYS_CONFIG));
+			bzero((void *)&sysconfig_data,sizeof(stSYS_CONFIG));
 			memcpy(&sysconfig_data,pData,dataLen);
 			if(0 == updateSysconfig(sysconfig_data)){
 					palyoPerationSuccess();
@@ -364,7 +434,7 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 			
 		case UI_UPDATE_NETCONFIG:
 			LOGI("UI_UPDATE_NETCONFIG!\n");
-			if( 0 == updateNetconfig(pData,dataLen))
+			if( 0 == updateNetconfig((void*)pData,dataLen))
 			{
 					palyoPerationSuccess();
 					sleep(1);
@@ -372,11 +442,13 @@ static int talkCommandCallBack(T_Room dest,unsigned  char          cmd,const    
 			}
 			break;
 		case UI_WAIT_LOCAL_HOOK_TIMEOUT:
-			stopPlayWav();
+			if(security_getAlarmState != E_ALARM_RUNING)
+				stopPlayWav();
 			LOGI("UI_WAIT_LOCAL_HOOK_TIMEOUT!\n");
 			break;
 		case UI_PEER_RST:
-			stopPlayWav();
+			if(security_getAlarmState != E_ALARM_RUNING)
+				stopPlayWav();
 			
 			LOGI("UI_PEER_RST");
 			break;

@@ -135,7 +135,7 @@ int read_gpio_key(void ) {
 #endif
 			if (ev[i].type == EV_KEY) {
 				clock_gettime(CLOCK_MONOTONIC, &current_time);
-				if(ev[i].value == KEY_DOWN){
+				if(ev[i].value == KEY_STATE_DOWN){
 					
 					j = findUnusedKeyArray();
 					if(j == -1)
@@ -144,7 +144,7 @@ int read_gpio_key(void ) {
 					keyArray[j].isUser = 1;
 					keyArray[j].keyCode = ev[i].code;
 					
-				}else if(ev[i].value == KEY_UP ){
+				}else if(ev[i].value == KEY_STATE_UP ){
 					j = findkeyCodeIndex(ev[i].code);
 					if(j == -1)
 						return -1;
@@ -155,7 +155,7 @@ int read_gpio_key(void ) {
 					if(press_nsec <= 600*1000*1000LL  )
 					{
 						keyState = E_SHORT_PRESS;
-					}else if((press_nsec >=3000*1000*1000LL) && (press_nsec <=7000*1000*1000LL))
+					}else if((press_nsec >=2000*1000*1000LL) && (press_nsec <=7000*1000*1000LL))
 					{
 						keyState = E_LONG_PRESS;
 					}else if( (press_nsec >=10000*1000*1000LL))
@@ -201,6 +201,7 @@ static void *keyScanThread(void *arg)
 	{
 		read_gpio_key();
 	}
+	printf(" keyScanThread exit !\n");
 	return NULL;		
 }
 
