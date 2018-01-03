@@ -200,9 +200,11 @@ pBufferOps createBufferServer(int size)
 	}
 	bzero(&ev,sizeof(ev));
 	ev.data.fd = bufferServer->wakeFds[0];
-	ev.events = EPOLLIN | EPOLLET;
+	ev.events = EPOLLIN ;
 	epoll_ctl(bufferServer->epoolFd, EPOLL_CTL_ADD,bufferServer->wakeFds[0], &ev);
 	pthread_mutex_init(&bufferServer->_mutex,NULL);
+
+	
 	return (pBufferOps)bufferServer;
 	fail2:
 		free(bufferServer->buffer);

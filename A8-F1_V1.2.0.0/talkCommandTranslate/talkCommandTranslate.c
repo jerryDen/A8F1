@@ -1043,16 +1043,19 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 		case    OTHER_DEV_PROC:
 			{
 				T_Room destRoom;
-				LOGI("OTHER_DEV_PROC！3");
-				
+				LOGI("OTHER_DEV_PROC");
+				//destRoom是对讲状态时的目的IP
+				//pRecv->sorAddr 是发消者的设置目的IP
+				//
 				if(0 == getTalkDestRoom(stateMachinePack, &destRoom))
 				{
-					if(memcmp(&destRoom,&(pRecv->sorAddr),sizeof(T_Room)) == 0  )
+					if(memcmp(&destRoom,&(pRecv->destAddr),sizeof(T_Room)) != 0  )
 					{
+						//说明正在对讲状态的房号,跟所需要挂断的房号不一样
 						break;
 					}
 				}
-				//走到这里说明不是自己发出去的组播
+				
 				
 				if(getLocalTalkState(stateMachinePack) == WAIT_LOCAL_HOOK){
 					

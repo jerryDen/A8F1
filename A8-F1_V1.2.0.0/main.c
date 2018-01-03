@@ -221,7 +221,7 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			if(keyValue == KEY_STATE_DOWN)
 			{
 				LOGD("MC_ALARM");
-				security_promptlySendAlarm(E_MC_ALARM);
+			//	security_promptlySendAlarm(E_MC_ALARM);
 			}else if(keyValue == KEY_STATE_UP)
 			{
 				
@@ -232,7 +232,7 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			{
 				
 				LOGD("YW_ALARM");
-				security_promptlySendAlarm(E_YW_ALARM);
+			//	security_promptlySendAlarm(E_YW_ALARM);
 				
 			}else if(keyValue == KEY_STATE_UP)
 			{
