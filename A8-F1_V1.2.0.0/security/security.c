@@ -246,6 +246,7 @@ static void security_triggerAlarmTinkle(void *arg)
 		//这里有0.5/40的几率会产生BUG
 		alarm_state_TimerId = createTimerTaskServer(39500,0,1,security_setAlarmState
 					   ,&state,sizeof(state));
+		alarm_state_TimerId->start(alarm_state_TimerId);
 	}
 	upSecurityMsgToUi(UI_ALARM_TRIGGER,arg,sizeof(int));
 	

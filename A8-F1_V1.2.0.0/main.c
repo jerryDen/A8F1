@@ -185,11 +185,12 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_STATE_UP)
-			{
 				LOGD("MQ_ALARM");
 				
 				security_promptlySendAlarm(E_MQ_ALARM);
+				
+			}else if(keyValue == KEY_STATE_UP)
+			{
 				
 			}
 			break;
@@ -197,41 +198,44 @@ static void inputEventCallBack(int keyCode,int keyValue,int keyState)
 			
 			if(keyValue == KEY_STATE_DOWN)
 			{
-			}else if(keyValue == KEY_STATE_UP)
-			{
 				LOGD("HW_ALARM");
 				
 				security_delaySendAlarm(E_HW_ALARM);
+			}else if(keyValue == KEY_STATE_UP)
+			{
+			
 			}
 			break;
 		case JJ_ALARM:
 			if(keyValue == KEY_STATE_DOWN)
 			{
+				LOGD("JJ_ALARM");
+				security_promptlySendAlarm(E_JJ_ALARM);
 				
 			}else if(keyValue == KEY_STATE_UP)
 			{
-				LOGD("JJ_ALARM");
-				security_promptlySendAlarm(E_JJ_ALARM);
+				
 			}
 			break;
 		case MC_ALARM:
 			if(keyValue == KEY_STATE_DOWN)
 			{
-				
-			}else if(keyValue == KEY_STATE_UP)
-			{
 				LOGD("MC_ALARM");
 				security_promptlySendAlarm(E_MC_ALARM);
+			}else if(keyValue == KEY_STATE_UP)
+			{
+				
 			}
 			break;
 		case YW_ALARM:
 			if(keyValue == KEY_STATE_DOWN)
 			{
 				
-			}else if(keyValue == KEY_STATE_UP)
-			{
 				LOGD("YW_ALARM");
 				security_promptlySendAlarm(E_YW_ALARM);
+				
+			}else if(keyValue == KEY_STATE_UP)
+			{
 			}
 			break;
 		default:
