@@ -283,7 +283,7 @@ typedef struct {
 
 
 typedef struct {
-	#define UDP_BUF_MAXSIZE 1024
+	#define UDP_BUF_MAXSIZE 2048
 	unsigned char buf[UDP_BUF_MAXSIZE];
 	int len;
 	int offset;

@@ -16,7 +16,7 @@
 #define RESERVED (512)
 #define AUGMENT_SIZE 512
 
-#define MAX_SIZE (2*1024)
+#define MAX_SIZE (3*1024)
 
 typedef struct BufferServer{
 	BufferOps ops;

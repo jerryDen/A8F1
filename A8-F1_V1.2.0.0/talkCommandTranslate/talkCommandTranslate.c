@@ -442,7 +442,7 @@ void talkCommandExit(void)
 static int udpBoardCastRecvCallBack(unsigned char*data  ,unsigned int len)
 {
 	MsgBody recvDataBuf;
-	LOGD("udpBoard:");
+	LOGD("udpBoard  len:%d ",len);
 	getUtilsOps()->printData(data,len);
 	bzero(&recvDataBuf,sizeof(MsgBody));
 	if(data == NULL)
@@ -475,7 +475,7 @@ static  int udpMulitRecvCallBack(unsigned char* data,unsigned int len)
 {	
 	MsgBody recvDataBuf;
 	struct sockaddr_in sourceIp;
-	LOGD("udpMulit:");
+	LOGD("udpMulit: data len:%d",len);
 	getUtilsOps()->printData(data,len);
 	bzero(&recvDataBuf,sizeof(MsgBody));
 	if(data == NULL)
@@ -759,7 +759,7 @@ static int ackcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int len
 					upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData + sizeof(int),*updateDataLen);
 				}else{
 
-					LOGE("数据长度不对！");
+					LOGE("数据长度不对！ 实际接收到:%d字节,本包一共有:%d字节",len,*updateDataLen);
 				}
 		}
 			break;
@@ -846,7 +846,7 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 		    	LOGE("Set system datatime error!/n");  
 		    	break; 
 		    } 
-			MsgBody dataBody;
+			
 			dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,(const void *)&heartbeatPack,sizeof(heartbeatPack));
 			udpServer->ack(udpServer,dataBody.buf,dataBody.len);
 			
@@ -1100,7 +1100,7 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 					upCmdtoUiFunction(pRecv->sorAddr,UI_UPDATE_NETCONFIG,recvData + sizeof(int),*updateDataLen);
 				}else{
 
-					LOGE("数据长度不对！");
+					LOGE("数据长度不对！ 实际接收到:%d字节,本包一共有:%d字节",len,*updateDataLen);
 				}
 			}
 		

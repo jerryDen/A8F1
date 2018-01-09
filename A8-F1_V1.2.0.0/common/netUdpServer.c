@@ -62,6 +62,7 @@ static int getRemoteInfo(struct UdpOps* base,struct sockaddr_in *remoteInfo);
 static int _setsockopt(struct UdpOps* base, int level, int optname,const void *optval, socklen_t optlen);
 static int setRemoteInfo(struct UdpOps* base,struct sockaddr_in remoteInfo);
 
+#define UDP_BUF_MAX_SIZE 2*1024
 
 static UdpOps ops = {
 		.setHandle = setHandle,
@@ -79,7 +80,7 @@ static  void * udpRecvThreadFunc(void *arg)
 	int epfd, nfds;
 	int readLen = 0;
 	struct epoll_event ev, events[EVENT_NUMS];
-	char readBuff[1024] = {0};
+	char readBuff[UDP_BUF_MAX_SIZE] = {0};
 	pUdpServer udpServer  =*((pUdpServer*)arg);
 	LOGD("udpRecvThreadFunc");
 	if(udpServer == NULL)
@@ -143,8 +144,8 @@ static  void * UdpParseThreadFunc(void *arg)
 		goto exit;
 	}
 	int ret = 0;
-	char recvBuf[2046] = {0};
-	char validBuf[2046] = {0};
+	char recvBuf[UDP_BUF_MAX_SIZE] = {0};
+	char validBuf[UDP_BUF_MAX_SIZE] = {0};
 	int  recvLen = 0;
 	int  pullLen = 0;
 	int  validLen;
