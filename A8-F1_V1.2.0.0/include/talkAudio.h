@@ -8,6 +8,9 @@ int talkAudioStart(int destIP);
 int talkAudioStop(void);
 int talkAudioExit(void);
 
+ int usAudioOpen(void);
+void usAudioClose(void);
+
 
 
 

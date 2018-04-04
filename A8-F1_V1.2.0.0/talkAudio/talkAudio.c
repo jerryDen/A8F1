@@ -34,16 +34,11 @@ static int sendTalkAudio(const struct timeval *tv,void *buf,uint32_t size);
 
 
 
-int  talkAudioInit(void)
+
+
+ int usAudioOpen(void)
 {
 	int ret;
-	ret  = initSendSocket();
-	CHECK_RET(ret != 0, "fail to initSendSocket!", goto fail0);
-	ret  = initRecvSocket();
-	CHECK_RET(ret != 0, "fail to initRecvSocket!", goto fail0);
-
-	talkAudioState = AUDIO_FREE;
-	UsCamSysInit();
 	UsCamAudioAttr attr;
 	attr.cbm = sendTalkAudio;
 	attr.sampleRate = 8000;
@@ -53,8 +48,29 @@ int  talkAudioInit(void)
 	CHECK_RET(ret != 0, "fail to UsCamAudioOpen!", goto fail0);
 	return 0;
 fail0:
+	return 1;
+}
+void usAudioClose(void)
+{
+ 	 UsCamAudioClose();
+}
+
+
+int  talkAudioInit(void)
+{
+	int ret;
+	ret  = initSendSocket();
+	CHECK_RET(ret != 0, "fail to initSendSocket!", goto fail0);
+	ret  = initRecvSocket();
+	CHECK_RET(ret != 0, "fail to initRecvSocket!", goto fail0);
+	
+	talkAudioState = AUDIO_FREE;
+	UsCamSysInit();
+	return 0;
+fail0:
 	return -1;
 }
+
 
 
 
@@ -63,7 +79,6 @@ int  talkAudioStart(int destIP)
 	int ret ; 
 	if(talkAudioState == AUDIO_TALKING)
 		return -1;
-	
 	ret = UsCamSysInit();
 	CHECK_RET(ret < 0, "fail to udp_startFdRecv!", goto fail0);
 	ret = us_talkInitPcm();
@@ -72,9 +87,10 @@ int  talkAudioStart(int destIP)
 	CHECK_RET(ret < 0, "fail to UsCamAudioStart!", goto fail0);
 	destIpAddr  = destIP;
 	pthread_mutex_lock(&talkAudioState_mutex);
-
+	usAudioOpen();
 	talkAudioState = AUDIO_TALKING;
 	pthread_mutex_unlock(&talkAudioState_mutex);
+	system("himm 0x20180200  0x80");
 	return 0;
 fail0:
 	return -1;
@@ -85,7 +101,10 @@ int talkAudioStop(void)
 	int ret ;
 	if(talkAudioState == AUDIO_FREE)
 		return -1;
+	UsCamSysDeInit();
 	ret  = UsCamAudioStop();
+	
+	system("himm 0x20180200  0x00");
 	CHECK_RET(ret < 0, "fail to UsCamAudioStop!", goto fail0);
 	pthread_mutex_lock(&talkAudioState_mutex);
 	talkAudioState = AUDIO_FREE;

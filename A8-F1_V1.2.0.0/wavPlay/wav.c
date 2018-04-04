@@ -70,7 +70,7 @@ int wavPlaymusic(const char *name,int playTime,int volume)
 	 	pthread_mutex_unlock(&wavThreadID_mutex);
 	 	goto fail0;
 	 }
-
+	
 	wavThreadID->start(wavThreadID);
 	pthread_mutex_unlock(&wavThreadID_mutex);
 	 return 0;
@@ -159,6 +159,11 @@ static void *playWavThread(void * arg)
 		goto end;
 	}
 start:
+	system("himm 0x20180200  0x80");
+	UsCamSysDeInit();
+	UsCamSysInit();
+	usAudioOpen();
+
 	chunk_bytes = GetWavChunkBytes();
 	//while(pthread_checkRunState(wavThreadID) == Thread_Run){
 	while(wavThreadID&&wavThreadID->check(wavThreadID) == Thread_Run){
@@ -203,6 +208,8 @@ start:
 	
 	}
 end:
+	system("himm 0x20180200  0x00");
+	usAudioClose();
 	LOGD("playWavThread exit!");
 	if(wav_pb_buf)
 		free(wav_pb_buf);

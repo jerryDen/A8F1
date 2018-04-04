@@ -467,6 +467,8 @@ HI_U32 talkWritePcm( HI_VOID *buf, HI_U32 bytes )
 //	if( (p != buf) && bytes ){
 //		memcpy(buf, p, bytes);
 //	}
+	
+
 	return userLen;
 }
 
