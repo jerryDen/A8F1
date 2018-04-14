@@ -123,6 +123,7 @@ static void *playWavThread(void * arg)
 	
 	pWavPlayArg wavArg = (pWavPlayArg)arg;
 	int pb_fd = -1;
+	int ret;
 	WavParames wavParames;
 	unsigned char *wav_pb_buf = malloc(1024);
 	int dtawave,pb_count,loaded;
@@ -161,7 +162,11 @@ static void *playWavThread(void * arg)
 start:
 	system("himm 0x20180200  0x80");
 	UsCamSysDeInit();
-	UsCamSysInit();
+	ret = UsCamSysInit();
+	if(ret < 0)
+	{
+		LOGE("fail to  UsCamSysInit!!!!");
+	}
 	usAudioOpen();
 
 	chunk_bytes = GetWavChunkBytes();

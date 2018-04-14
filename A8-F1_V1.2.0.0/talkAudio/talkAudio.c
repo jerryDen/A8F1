@@ -103,7 +103,7 @@ int talkAudioStop(void)
 		return -1;
 	UsCamSysDeInit();
 	ret  = UsCamAudioStop();
-	
+	usAudioClose();
 	system("himm 0x20180200  0x00");
 	CHECK_RET(ret < 0, "fail to UsCamAudioStop!", goto fail0);
 	pthread_mutex_lock(&talkAudioState_mutex);

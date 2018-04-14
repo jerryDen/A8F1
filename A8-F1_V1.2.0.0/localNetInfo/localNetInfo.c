@@ -134,6 +134,7 @@ int joinMulticast( int fd,unsigned int multiaddr)
 		return -1;
 	}
 	int loop = 0;
+	//禁止组播回传！
 	if(setsockopt(fd,IPPROTO_IP,IP_MULTICAST_LOOP,&loop,sizeof(loop)) < 0)
 	{
 		LOGE("IP_MULTICAST_LOOP\n");
