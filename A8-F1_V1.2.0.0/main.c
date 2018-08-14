@@ -97,6 +97,8 @@ int main(void)
 	signal(SIGINT, sigroutine); 
 	signal(SIGQUIT, sigroutine); 
 	signal(SIGPIPE, sigroutine); 
+	
+	LOGD("create:20180814\n");
 	for(;;)
 	{
 	//以下代码只做测试使用,量产后会去除
