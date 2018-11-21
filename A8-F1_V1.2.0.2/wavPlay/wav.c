@@ -25,9 +25,6 @@
 #include "DebugLog.h"
 #include "commonHead.h"
 
-
-
-
 typedef struct WavPlayArg{
 	char *name;
 	int playTime;

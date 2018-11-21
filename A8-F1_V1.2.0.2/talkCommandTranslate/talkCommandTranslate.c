@@ -480,9 +480,7 @@ void talkCommandExit(void)
 	destroyUdpServer(&udpSingleServer);
 	destroyUdpServer(&udpMulticastServer);
 	destroyUdpServer(&udpBoardServer);
-
-	
-	destroyBufferServer(&udpSendBuf);
+ 	destroyBufferServer(&udpSendBuf);
 	
 	pthread_destroy(&sendUdpDataThread);	
 	destroyTimerTaskServer(&delaySendBusyTimerId);

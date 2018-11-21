@@ -843,10 +843,9 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 			LOGD("SET_TIME !!");
 			if(settimeofday (&tv, (struct timezone *) 0) < 0)  
 		    {  
-		    	LOGE("Set system datatime error!/n");  
+		    	LOGE("Set system time error!/n");  
 		    	break; 
 		    } 
-			
 			dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,(const void *)&heartbeatPack,sizeof(heartbeatPack));
 			udpServer->ack(udpServer,dataBody.buf,dataBody.len);
 			
@@ -984,8 +983,6 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 
 			}
 
-
-			
 			break;
 		case 	UNHOOK_CMD:
 			LOGD("UNHOOK_CMD !");
@@ -999,7 +996,6 @@ static int notAckcmdParseAndHandle(pT_Comm_Head pRecv, const void *recvData,int 
 					break;
 				}
 			}
-
 			if(getLocalTalkState(stateMachinePack) == TALKING)
 			{
 				dataBody = UdpBuildMsg(ACK_OK,pRecv->cmd,localRoom,pRecv->sorAddr,NULL,0);

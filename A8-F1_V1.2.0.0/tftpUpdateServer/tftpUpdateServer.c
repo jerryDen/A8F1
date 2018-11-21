@@ -30,8 +30,8 @@ static int updateState = 0;
 static int getUpdateTimeMs(uint32_t size)
 {
 	int timeMs;
-	unsigned int sequence = getLocalSequence();
-	if(sequence  != -1 ){
+	int sequence = getLocalSequence();
+	if(sequence  > 0 ){
 		timeMs = ((1.0 + 50.0 * size / 1000000.0) * sequence);
 		return 	timeMs;
 	}
@@ -99,7 +99,7 @@ int startTftpUpdate(T_TFTP_UPDATE *updatePack)
 	pid = fork();
 	if(pid == 0)
 	{
-		while((timeMs -= 10)>0 ){
+		while((timeMs -= 10)>0 ){  //12500
 			
 			usleep(20*1000);
 		}
